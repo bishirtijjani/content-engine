@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# database (the content.db is generated — never commit it)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# python false start (removed)
+*.pyc
+__pycache__/
+
+# logs
+*.log
+
+# os
+.DS_Store
+Thumbs.db

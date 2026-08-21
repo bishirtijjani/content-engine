@@ -1,0 +1,10 @@
+{
+  "name": "@content-os/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The contract every engine depends on: schema, state machine, human gates, db layer",
+  "exports": {
+    ".": "./src/index.js"
+  }
+}

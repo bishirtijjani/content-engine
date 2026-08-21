@@ -1,0 +1,13 @@
+{
+  "name": "@content-os/engine-engagement",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Engagement Engine — monitor, classify, reply, escalate, save ideas",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@content-os/core": "*"
+  }
+}

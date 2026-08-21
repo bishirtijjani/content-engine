@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Script — content-os</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --surface-hover: #242424;
+      --border: #2a2a2a;
+      --text: #e0e0e0;
+      --text-muted: #888;
+      --accent: #4ade80;
+      --accent-hover: #22c55e;
+      --hook: #facc15;
+      --danger: #ef4444;
+      --radius: 8px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ---- top bar ---- */
+    .topbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar h1 {
+      font-size: 14px; font-weight: 600;
+      color: var(--text-muted); letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 12px;
+      background: var(--accent); color: #000; font-weight: 600;
+    }
+    .topbar-right { display: flex; gap: 8px; }
+
+    button {
+      font-family: inherit; font-size: 13px; font-weight: 500;
+      padding: 6px 14px; border-radius: var(--radius);
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); cursor: pointer; transition: all 0.15s;
+    }
+    button:hover { background: var(--surface-hover); }
+    button.primary {
+      background: var(--accent); color: #000; border-color: var(--accent);
+    }
+    button.primary:hover { background: var(--accent-hover); }
+    .save-status {
+      font-size: 12px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .save-status .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); display: inline-block;
+    }
+    .save-status.unsaved .dot { background: var(--hook); }
+
+    /* ---- layout ---- */
+    .container {
+      max-width: 860px; margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    /* ---- view mode (rendered markdown) ---- */
+    .rendered {
+      line-height: 1.75;
+      font-size: 16px;
+    }
+    .rendered h1 {
+      font-size: 28px; font-weight: 700; margin-bottom: 8px;
+      color: #fff;
+    }
+    .rendered h2 {
+      font-size: 18px; font-weight: 600; margin: 32px 0 12px;
+      color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .rendered h3 {
+      font-size: 16px; font-weight: 600; margin: 20px 0 8px;
+      color: var(--text);
+    }
+    .rendered p { margin: 12px 0; }
+    .rendered blockquote {
+      border-left: 3px solid var(--hook);
+      padding: 16px 20px; margin: 16px 0;
+      background: rgba(250, 204, 21, 0.05);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 18px; font-weight: 500; color: var(--hook);
+      font-style: italic;
+    }
+    .rendered strong { color: #fff; }
+    .rendered hr {
+      border: none; border-top: 1px solid var(--border); margin: 24px 0;
+    }
+    .rendered ul, .rendered ol {
+      padding-left: 24px; margin: 12px 0;
+    }
+    .rendered li { margin: 6px 0; }
+
+    /* ---- edit mode (textarea) ---- */
+    .editor {
+      display: none;
+      width: 100%; min-height: 70vh;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 14px; line-height: 1.7;
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 24px; resize: vertical;
+      outline: none;
+    }
+    .editor:focus { border-color: var(--accent); }
+
+    body.editing .rendered { display: none; }
+    body.editing .editor { display: block; }
+
+    /* ---- keyboard shortcut hint ---- */
+    .shortcut-hint {
+      position: fixed; bottom: 16px; right: 16px;
+      font-size: 11px; color: var(--text-muted);
+      background: var(--surface); padding: 4px 10px;
+      border-radius: var(--radius); border: 1px solid var(--border);
+    }
+    kbd {
+      font-family: inherit; font-size: 10px;
+      background: var(--surface-hover); padding: 1px 5px;
+      border-radius: 3px; border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>Script</h1>
+      <span class="badge">content-os</span>
+    </div>
+    <div class="topbar-right">
+      <span class="save-status" id="saveStatus">
+        <span class="dot"></span> saved
+      </span>
+      <button id="editBtn" onclick="toggleEdit()">Edit</button>
+      <button id="saveBtn" class="primary" onclick="save()" style="display:none">Save</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="rendered" id="rendered"></div>
+    <textarea class="editor" id="editor" spellcheck="false"></textarea>
+  </div>
+
+  <div class="shortcut-hint">
+    <kbd>Ctrl</kbd>+<kbd>S</kbd> save &nbsp;&middot;&nbsp;
+    <kbd>Ctrl</kbd>+<kbd>E</kbd> edit
+  </div>
+
+  <script>
+    const ITEM_ID = __ITEM_ID__;
+    let markdown = `__MARKDOWN_DATA__`;
+    let dirty = false;
+
+    // Render the markdown
+    function render() {
+      document.getElementById('rendered').innerHTML = marked.parse(markdown);
+      document.getElementById('editor').value = markdown;
+    }
+
+    // Toggle edit mode
+    function toggleEdit() {
+      const body = document.body;
+      const editing = body.classList.toggle('editing');
+      document.getElementById('editBtn').textContent = editing ? 'Preview' : 'Edit';
+      document.getElementById('saveBtn').style.display = editing ? '' : 'none';
+      if (editing) {
+        document.getElementById('editor').focus();
+      } else {
+        markdown = document.getElementById('editor').value;
+        render();
+        markDirty();
+      }
+    }
+
+    // Save to server
+    async function save() {
+      const md = document.getElementById('editor').value || markdown;
+      try {
+        const res = await fetch('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ markdown: md, itemId: ITEM_ID }),
+        });
+        if (res.ok) {
+          markdown = md;
+          render();
+          dirty = false;
+          const status = document.getElementById('saveStatus');
+          status.className = 'save-status';
+          status.innerHTML = '<span class="dot"></span> saved';
+        }
+      } catch (e) {
+        console.error('save failed:', e);
+      }
+    }
+
+    function markDirty() {
+      if (!dirty) {
+        dirty = true;
+        const status = document.getElementById('saveStatus');
+        status.className = 'save-status unsaved';
+        status.innerHTML = '<span class="dot"></span> unsaved';
+      }
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        save();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        toggleEdit();
+      }
+    });
+
+    // Track edits
+    document.getElementById('editor').addEventListener('input', markDirty);
+
+    // Init
+    render();
+  </script>
+</body>
+</html>

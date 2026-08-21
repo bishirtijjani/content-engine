@@ -1,0 +1,17 @@
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync('data/content.db');
+db.exec('PRAGMA foreign_keys = ON');
+const n = db.prepare('SELECT COUNT(*) AS n FROM content_items').get().n;
+console.log('items before:', n);
+db.exec('DELETE FROM content_item_history');
+db.exec('DELETE FROM content_links');
+db.exec('DELETE FROM content_item_recordings');
+db.exec('DELETE FROM assets');
+db.exec('DELETE FROM posts');
+db.exec('DELETE FROM metrics');
+db.exec('DELETE FROM content_items');
+db.exec('DELETE FROM gates');
+db.exec("DELETE FROM engine_logs");
+const n2 = db.prepare('SELECT COUNT(*) AS n FROM content_items').get().n;
+console.log('items after:', n2);
+db.close();

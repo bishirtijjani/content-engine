@@ -1,0 +1,13 @@
+{
+  "name": "@content-os/engine-analytics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Analytics Engine — collect, analyze, insights. Closes the loop",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@content-os/core": "*"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "content-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Full content automation engine — content database + 5 independent engines + 3 human gates",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test \"packages/*/test/*.test.js\"",
+    "test:core": "node --disable-warning=ExperimentalWarning --test packages/core/test/",
+    "test:content": "node --disable-warning=ExperimentalWarning --test packages/engine-content/test/"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@content-os/engine-content",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Content Engine — discover, evaluate, plan, research, script. Output: READY TO SHOOT",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@content-os/core": "*"
+  }
+}

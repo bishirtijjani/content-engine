@@ -1,0 +1,13 @@
+{
+  "name": "@content-os/engine-production",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Production Engine — raw footage to finished platform assets",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@content-os/core": "*"
+  }
+}
