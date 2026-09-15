@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "brand": {
+    "name": "Bishir Tijjani",
+    "lexicon": "brand/lexicon.json",
+    "assets": "brand/assets",
+    "tokens": ".opencode/skills/codeket-assets/references/tokens.css",
+    "account": "founder",
+    "accounts": {
+      "founder": { "handle": "@iambishir", "accent": "#0f4c81" }
+    },
+    "colors": {
+      "bg": "#EA580C",
+      "surface": "#F59E0B",
+      "text": "#FFFFFF",
+      "muted": "#FFFFFF",
+      "orange": "#EA580C",
+      "blue": "#0f4c81"
+    },
+    "fonts": {
+      "display": "Montserrat",
+      "body": "Plus Jakarta Sans",
+      "mono": "JetBrains Mono"
+    }
+  },
+  "captions": {
+    "engine": "faster-whisper",
+    "model": "base.en",
+    "language": "en",
+    "style": "codeket-locked",
+    "emphasis": ["AI automation", "AI engineer", "Bishir Tijjani"],
+    "maxEmphasisPerPhrase": 1,
+    "font": { "baseRatio": 0.052, "emphRatio": 1.8, "plainWeight": 600, "emphWeight": 900 },
+    "grouping": {
+      "maxWords": 5,
+      "maxChars": 30,
+      "pauseGap": 0.7,
+      "minDuration": 0.6,
+      "hold": 0.15
+    }
+  },
+  "funnel": {
+    "shorts": 3,
+    "long": { "aspect": "16:9", "resolution": "landscape" },
+    "short": { "aspect": "9:16", "resolution": "portrait" }
+  },
+  "routing": {
+    "footage": "embedded-captions",
+    "audio": "music-to-video",
+    "script": "faceless-explainer",
+    "url": "product-launch-video",
+    "pr": "pr-to-video",
+    "longform": "general-video"
+  },
+  "paths": {
+    "input": "input",
+    "jobs": "jobs",
+    "output": "output"
+  }
+}

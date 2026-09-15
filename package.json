@@ -10,6 +10,10 @@
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test \"packages/*/test/*.test.js\"",
     "test:core": "node --disable-warning=ExperimentalWarning --test packages/core/test/",
-    "test:content": "node --disable-warning=ExperimentalWarning --test packages/engine-content/test/"
+    "test:content": "node --disable-warning=ExperimentalWarning --test packages/engine-content/test/",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed-brand.mjs && node --disable-warning=ExperimentalWarning scripts/seed-script-framework.mjs && node --disable-warning=ExperimentalWarning scripts/seed-idea-framework.mjs",
+    "demo": "node --disable-warning=ExperimentalWarning demo.mjs",
+    "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke-pipeline.mjs",
+    "reset": "node --disable-warning=ExperimentalWarning scripts/reset-content.mjs"
   }
 }

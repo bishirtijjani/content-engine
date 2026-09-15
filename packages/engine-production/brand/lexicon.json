@@ -1,0 +1,11 @@
+{
+  "_note": "Proper-noun / term corrections applied to every transcript. Key = what the transcriber hears (case-insensitive whole word), value = correct spelling.",
+  "corrections": {
+    "Bissure": "Bishir",
+    "Bashir": "Bishir",
+    "CodeKit": "Bishir Tijjani",
+    "Codekit": "Bishir Tijjani",
+    "Code Kit": "Bishir Tijjani",
+    "Codeket": "Bishir Tijjani"
+  }
+}

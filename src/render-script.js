@@ -220,6 +220,16 @@ export function serveScript(markdown, itemId, db, opts = {}) {
       res.end();
     });
 
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\n  port ${port} is already in use — is another script renderer running?`);
+        console.error(`  kill it or pass a different port:\n    node scripts/serve-script.mjs <id> --port 3848\n`);
+      } else {
+        console.error(`\n  server error: ${err.message}\n`);
+      }
+      process.exit(1);
+    });
+
     server.listen(port, '127.0.0.1', () => {
       const url = `http://127.0.0.1:${port}`;
       console.log(`\n  script ready: ${url}`);

@@ -21,6 +21,24 @@ function approveGate(db, gateType, itemId) {
   return Number(res.lastInsertRowid);
 }
 
+// Agent-written content satisfying the structured script contract
+// (~161 spoken words — inside 120-180 for a default 60s item).
+function validScriptJson() {
+  const sentence = 'This is a spoken sentence that walks through the actual build step by step so the narration lands in the right length window.';
+  const narration = Array.from({ length: 7 }, () => sentence).join(' ');
+  return JSON.stringify({
+    hook: 'My client was spending 8 hours a week on invoices until we fixed this.',
+    script: narration,
+    points: [{ title: 'The problem', detail: 'Manual invoice work eats the week' }],
+    cta: 'Follow for the full build breakdown.',
+    shot_notes: 'Screen recording of the automation running, cut on sentence boundaries.',
+  });
+}
+
+const RESEARCH_NOTES =
+  'Facts: Manual invoicing costs small businesses about 8 hours weekly. ' +
+  'Source: client time-tracking audit, July. Claims to verify: hours saved after automation.';
+
 // ============================================================================
 // FULL LIFECYCLE: idea → measured (all three gates)
 // ============================================================================
@@ -54,21 +72,21 @@ test('full lifecycle: idea → measured through the engine (with all three gates
 
   // --- Step 6: agent writes research notes, engine finalizes → researched ---
   db.prepare(
-    "UPDATE content_items SET research_notes = 'Facts: V4 Flash pricing per token. Sources: vendor docs. Claims: benchmark comparison.' WHERE id = 1"
-  ).run();
+    "UPDATE content_items SET research_notes = ? WHERE id = 1"
+  ).run(RESEARCH_NOTES);
   const r = engine.research();
   assert.equal(r.processed, 1);
 
   // --- Step 7: agent writes the finished script, engine finalizes ---
   db.prepare(
-    "UPDATE content_items SET script = 'Hook: real hook\\n\\nPoint 1: real point\\nCTA: follow', " +
+    "UPDATE content_items SET script = ?, " +
     "shot_instructions = 'talking head + screen share' WHERE id = 1"
-  ).run();
+  ).run(validScriptJson());
   const sc = engine.script();
   assert.equal(sc.processed, 1);
   const scripted = db.prepare('SELECT status, script FROM content_items WHERE id = 1').get();
   assert.equal(scripted.status, 'scripted');
-  assert.match(scripted.script, /Hook:/);
+  assert.match(JSON.parse(scripted.script).hook, /8 hours/);
 
   // --- Step 8: ready → blocked (script gate not approved) ---
   const item = db.prepare('SELECT status FROM content_items WHERE id = 1').get();
@@ -141,9 +159,9 @@ test('batch production: session → recordings → items → assets → posts', 
   engine.plan();
 
   // Agent writes research notes + scripts — the engine never writes content
-  db.prepare("UPDATE content_items SET research_notes = 'agent research notes' WHERE id IN (1, 2, 3)").run();
+  db.prepare("UPDATE content_items SET research_notes = ? WHERE id IN (1, 2, 3)").run(RESEARCH_NOTES);
   engine.research();
-  db.prepare("UPDATE content_items SET script = 'Hook: h\\n\\nPoint 1: p\\nCTA: c' WHERE id IN (1, 2, 3)").run();
+  db.prepare("UPDATE content_items SET script = ? WHERE id IN (1, 2, 3)").run(validScriptJson());
   engine.script();
 
   // Approve all script gates

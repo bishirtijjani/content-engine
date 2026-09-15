@@ -1,0 +1,32 @@
+/* ============================================================
+   BISHIR TIJJANI BRAND DESIGN TOKENS  — single source of truth
+   60 / 30 / 10 rule baked in. Inline these variables into every asset.
+   ============================================================ */
+:root{
+  /* 60% — DOMINANT (Orange) */
+  --c-bg:#EA580C; --c-surface:#F59E0B; --c-surface-2:#D97706; --c-border:#C24100;
+  /* 30% — SECONDARY (text) */
+  --c-text:#FFFFFF; --c-text-muted:#FFFFFF; --c-text-dim:#FFFFFF;
+  /* 10% — ACCENTS */
+  --c-orange:#EA580C; --c-orange-soft:#FB923C; --c-navy:#0f4c81; --c-navy-soft:#336699;
+  --c-accent:var(--c-navy); --c-accent-2:var(--c-orange); --c-accent-soft:var(--c-navy-soft);
+  --c-success:#22C55E; --c-warning:#F59E0B; --c-danger:#EF4444;
+  /* Type */
+  --f-display:'Montserrat',system-ui,sans-serif;
+  --f-body:'Plus Jakarta Sans',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,monospace;
+  --fw-black:900; --fw-extrabold:800; --fw-bold:700; --fw-semibold:600; --fw-medium:500;
+  --fs-hero:clamp(2.75rem,6vw,4.5rem); --fs-h1:clamp(2rem,4vw,3rem); --fs-h2:1.75rem;
+  --fs-h3:1.3rem; --fs-body:1.05rem; --fs-small:.9rem; --fs-caption:.8rem;
+  --ls-tight:-.02em; --ls-caps:.06em; --lh-tight:1.05; --lh-body:1.6;
+  /* Spacing / radii / shadow */
+  --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:24px;--s-6:32px;--s-7:48px;--s-8:64px;--s-9:96px;
+  --r-sm:8px;--r-md:14px;--r-lg:22px;--r-xl:32px;--r-pill:999px;
+  --shadow-soft:0 18px 50px rgba(0,0,0,.45); --shadow-card:0 8px 24px rgba(0,0,0,.28);
+  --grad-orange:linear-gradient(160deg,#EA580C 0%,#F59E0B 100%);
+  --grad-accent:linear-gradient(135deg,var(--c-accent),var(--c-accent-soft));
+  --overlay-orange:linear-gradient(180deg,rgba(234,88,12,.35) 0%,rgba(234,88,12,.82) 62%,rgba(234,88,12,.96) 100%);
+  /* Caption drop shadow — no background/border, readable on any scene */
+  --cap-shadow:0 2px 6px rgba(0,0,0,.85), 0 6px 22px rgba(0,0,0,.75), 0 1px 2px rgba(0,0,0,.9);
+  --navy-halo:0 0 2px rgba(255,255,255,.55), 0 2px 6px rgba(0,0,0,.6), 0 0 14px rgba(255,255,255,.25);
+}

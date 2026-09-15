@@ -91,12 +91,15 @@ The Content Engine answers "What should we create?" — the first and most criti
 | Stage | Input | What it does | Output |
 |---|---|---|---|
 | **Discover** | Agent brainstorm + audience comments | The agent generates **fresh ideas each cycle** from brand knowledge, trends, and gaps; `addIdeas()` registers them; `discover()` picks up audience ideas | New items in `idea` status |
-| **Evaluate** | Candidate ideas + playbook rules | Scores each idea on 7 weighted dimensions | Scored items in `evaluated` + idea gate requested |
+| **Evaluate** | Candidate ideas + settings + playbook rules | Scores each idea on 7 weighted dimensions, persists score + reason | Scored items in `evaluated` + idea gate requested |
 | **Plan** | Approved ideas + playbook rules | Fills content strategy fields (pillar, format, hook, CTA, length) | Items in `planned` |
-| **Research** | Content strategy | Agent writes a research brief with facts, sources, claims; engine finalizes | Items in `researched` |
-| **Script** | Research brief + hook style | Agent writes the finished shooting script (hook, points, CTA, shot instructions); engine finalizes + requests script gate | Items in `scripted` + script gate requested |
+| **Research** | Content strategy | Agent writes a research brief with facts, sources, claims; engine validates substance and finalizes | Items in `researched` |
+| **Script** | Research brief + hook style | Agent writes the finished shooting script as structured JSON; engine validates structure + length and finalizes | Items in `scripted` + script gate requested |
+| **Ready** | Approved scripts | Moves gate-approved scripts into the shoot-ready queue | Items in `ready_to_shoot` |
 
-> **Content contract:** the engine never writes content. `research()` and `script()` only *finalize* agent-written content — they move items forward and request gates. The agent (the brain) writes `research_notes`, `script`, and `shot_instructions` directly. Items without agent-written content are skipped and logged. No placeholders ever enter the database.
+> **Content contract:** the engine never writes content. `research()` and `script()` only *finalize* agent-written content — they move items forward and request gates. The agent (the brain) writes `research_notes`, `script`, and `shot_instructions` directly. Items without agent-written content — or with structurally invalid content (placeholders, wrong narration length, plain-text scripts) — are skipped and logged.
+>
+> **Writing guides:** agents read `settings.script_framework` before writing scripts (hook rules per style, structure beats, length math, platform fit, 10-point checklist) and `settings.idea_framework` before generating ideas (face-time bar, duplicate checks, cycle procedure). Seed/update with `npm run seed`.
 
 ### Scoring dimensions (0–100)
 
@@ -196,15 +199,21 @@ engine.plan();
 
 // THE AGENT IS THE BRAIN — it writes the content, the engine finalizes it
 db.prepare(
-  "UPDATE content_items SET research_notes = 'Facts: ... Sources: ...' WHERE id = 1"
+  "UPDATE content_items SET research_notes = 'Facts: ... Sources: ... Claims to verify: ...' WHERE id = 1"
 ).run();
 engine.research();  // finalizes: planned -> researched
 
+const script = JSON.stringify({
+  hook: 'My client was spending 8 hours a week on invoices.',
+  script: '...spoken words only, 120-180 for a 60s item...',
+  points: [{ title: 'The problem', detail: '...' }],
+  cta: 'Follow for the full build.',
+  shot_notes: 'Screen recording of the automation running.',
+});
 db.prepare(
-  "UPDATE content_items SET script = 'Hook: ...\\n\\nPoint 1: ...\\nCTA: ...', " +
-  "shot_instructions = 'talking head + screen share' WHERE id = 1"
-).run();
-engine.script();    // finalizes: researched -> scripted + requests script gate
+  "UPDATE content_items SET script = ?, shot_instructions = 'talking head + screen share' WHERE id = 1"
+).run(script);
+engine.script();    // validates structure + length, finalizes + requests script gate
 
 // Render the agent-written script in the browser
 const item = db.prepare("SELECT * FROM content_items WHERE id = 1").get();
@@ -215,12 +224,15 @@ await serveScript(md, item.id, db);
 ### Individual actions
 
 ```js
-engine.discover();                                    // pull new ideas from sources
-engine.evaluate();                                    // score all idea items
+engine.addIdeas([...]);                               // register fresh agent-generated ideas (dedupes by title)
+engine.discover();                                    // pull audience ideas from engagement items
+engine.evaluate();                                    // score all idea items (persists score + reason)
 engine.plan();                                        // fill plan fields for approved items
-engine.research();                                    // generate research briefs
-engine.script();                                      // generate shooting scripts
-engine.run({ action: 'evaluate', targetId: 3 });      // score a specific item
+engine.research();                                    // finalize agent-written research notes
+engine.script();                                      // finalize agent-written scripts (validated)
+engine.ready();                                       // move gate-approved scripts to ready_to_shoot
+engine.resubmit({ targetId: 3 });                     // re-request review after a rejected script
+engine.run({ action: 'evaluate', targetId: 3 });      // run one action on a specific item
 engine.run({ dryRun: true });                         // preview without changes
 ```
 
@@ -257,13 +269,13 @@ Features:
 
 ```bash
 npm install              # links workspace packages (no external deps)
-npm test                 # run all tests (41 passing)
+npm test                 # run all tests (55 passing)
 ```
 
 ### Seed your brand
 
 ```bash
-node scripts/seed-brand.mjs    # seeds the Bishir/Codeket brand profile (no ideas — those are generated fresh each cycle)
+npm run seed             # brand profile + script framework + idea framework (no ideas — those are generated fresh each cycle)
 ```
 
 ### Run the pipeline
@@ -294,9 +306,11 @@ content-os/
 ├── data/                         the shared content.db (generated, never committed)
 ├── scripts/
 │   ├── seed-brand.mjs            seed brand settings (ideas are generated fresh by the agent)
+│   ├── seed-script-framework.mjs seed the script-writing guide (settings.script_framework)
+│   ├── seed-idea-framework.mjs   seed the idea-generation guide (settings.idea_framework)
 │   ├── smoke-pipeline.mjs        end-to-end smoke test
 │   ├── reset-content.mjs         purge placeholder content, reset items to agent-ready state
-│   └── serve-script.mjs          render an item's script in the browser (node scripts/serve-script.mjs <id>)
+│   └── serve-script.mjs          render an item's script in the browser (node scripts/serve-script.mjs <id> [--port 3848])
 └── packages/
     ├── core/                     THE CONTRACT — schema, state machine, gates, db layer
     │   ├── src/
@@ -309,9 +323,9 @@ content-os/
     │   │   └── engines/base.js   BaseEngine: logging + queue survey
     │   └── test/state.test.js    12 tests
     ├── engine-content/           Content Engine (fully implemented)
-    │   ├── src/index.js          discover, evaluate, plan, research, script
+    │   ├── src/index.js          addIdeas, discover, evaluate, plan, research, script, ready, resubmit
     │   └── test/
-    │       ├── content.test.js   23 engine tests
+    │       ├── content.test.js   38 engine tests
     │       └── lifecycle.test.js 5 lifecycle + render tests
     ├── engine-production/        skeleton — session → recordings → finished assets
     ├── engine-distribution/      skeleton — adapt → schedule → publish → cross-post
@@ -324,22 +338,22 @@ content-os/
 ## Testing
 
 ```bash
-npm test                 # 41 tests across core + engine-content + lifecycle
+npm test                 # 55 tests across core + engine-content + lifecycle
 ```
 
 | Package | Tests | What they cover |
 |---|---|---|
 | `@content-os/core` | 12 | Transitions, gates, lifecycle, retry, fast-track |
-| `@content-os/engine-content` | 24 | Discover, evaluate, plan, research/script finalization, pipeline, playbook, idempotency |
+| `@content-os/engine-content` | 38 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
 | Lifecycle | 5 | Full lifecycle with all 3 gates, batch production, fast-track, illegal jumps, Markdown rendering |
 
 ---
 
-## Brand: Bishir / Codeket
+## Brand: Bishir Tijjani
 
 The system is seeded with a real brand profile:
 
-- **Who:** Bishir, founder of Codeket — full-stack engineer who builds production systems
+- **Who:** Bishir Tijjani — full-stack engineer who builds production systems
 - **Positioning:** "Custom software and AI that actually works"
 - **5 pillars:** workflow-automation, custom-software, ai-implementation, customer-acquisition, business-operations
 - **5 platforms:** TikTok (5x/week), YouTube (2x/week), Instagram (3x/week), LinkedIn (3x/week), X (daily)
@@ -352,7 +366,7 @@ The system is seeded with a real brand profile:
 
 | Engine | Status | Actions implemented |
 |---|---|---|
-| Content | **Fully implemented** | discover, evaluate (7-dim scoring), plan (playbook rules), research (finalizes agent notes), script (finalizes agent scripts) |
+| Content | **Fully implemented** | addIdeas, discover, evaluate (7-dim scoring, persisted), plan (playbook + settings fallbacks), research/script (finalize + structural validation), ready, resubmit |
 | Production | Stubbed | Contract defined — session → recordings → assets |
 | Distribution | Stubbed | Contract defined — adapt → schedule → publish → cross-post |
 | Engagement | Stubbed | Contract defined — monitor → classify → reply → escalate |
@@ -374,9 +388,10 @@ The system is seeded with a real brand profile:
 ## Status
 
 - **Foundation:** complete — schema v2, enforced state machine, human gates, batch production model
-- **Content Engine:** fully implemented — fresh idea generation each cycle, pipeline runs end-to-end
+- **Content Engine:** production-ready — fresh ideas each cycle, scoring persisted, structural validation on research/scripts, full state coverage (idea → ready_to_shoot) including the revision loop
 - **Content contract:** the engine never writes content — the agent generates ideas and writes research notes and scripts; the engine finalizes and requests gates
-- **Tests:** 41/41 passing
+- **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing` skill encode the full loop for any agent tool
+- **Tests:** 55/55 passing
 - **Other engines:** stubbed with clear contracts, ready to build
 
 See [architecture.md](architecture.md) for the recommended build order.

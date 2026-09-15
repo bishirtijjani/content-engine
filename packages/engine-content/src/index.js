@@ -56,12 +56,36 @@ const FORMAT_LENGTHS = {
 };
 
 // ---------------------------------------------------------------------------
+// Structural quality floor — enforced by script()/research() before an item
+// can move forward. Garbage never reaches the human review gates.
+// ---------------------------------------------------------------------------
+const PLACEHOLDER_PATTERNS = [
+  { re: /^point \d+:/im, label: '"Point N:" template heading' },
+  { re: /evidence and supporting/i, label: '"Evidence and supporting" template text' },
+  { re: /lorem ipsum/i, label: 'lorem ipsum filler' },
+  { re: /\btbd\b/i, label: 'TBD marker' },
+  { re: /\[insert /i, label: '[insert ...] stub' },
+  { re: /placeholder/i, label: 'placeholder marker' },
+];
+const MIN_RESEARCH_CHARS = 100;
+
+// "+/-20%" | 0.2 | 20 → 0.2 ; anything else → null (caller applies default)
+function parseTolerance(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value > 1 ? value / 100 : value;
+  if (typeof value === 'string') {
+    const m = value.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (m) return Number(m[1]) / 100;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Content Engine
 // ---------------------------------------------------------------------------
 export class ContentEngine extends BaseEngine {
   static NAME = 'content';
   static OWNED_STATES = ['idea', 'evaluated', 'planned', 'researched', 'scripted', 'ready_to_shoot'];
-  static ACTIONS = ['discover', 'evaluate', 'plan', 'research', 'script'];
+  static ACTIONS = ['discover', 'evaluate', 'plan', 'research', 'script', 'ready', 'resubmit'];
 
   /**
    * Run the content engine.
@@ -81,7 +105,7 @@ export class ContentEngine extends BaseEngine {
   }
 
   /**
-   * Full pipeline: discover → evaluate → plan → research → script.
+   * Full pipeline: discover → evaluate → plan → research → script → ready.
    */
   pipeline({ targetId = null, dryRun = false } = {}) {
     const results = {};
@@ -90,6 +114,7 @@ export class ContentEngine extends BaseEngine {
     results.plan = this.plan({ targetId, dryRun });
     results.research = this.research({ targetId, dryRun });
     results.script = this.script({ targetId, dryRun });
+    results.ready = this.ready({ targetId, dryRun });
 
     const total = Object.values(results).reduce((s, r) => s + (r.processed ?? 0), 0);
     this.log('pipeline', {
@@ -223,16 +248,23 @@ export class ContentEngine extends BaseEngine {
 
     const weights = this._loadWeights();
     const rules = this._loadPlaybookRules();
+    const settings = this._loadSettings();
     const evaluated = [];
 
     for (const raw of items) {
       const item = contentItem(raw);
-      const score = this._scoreItem(item, weights, rules);
+      const { score, reason } = this._scoreItem(item, weights, rules, settings);
 
       if (dryRun) {
         evaluated.push({ id: item.id, score });
         continue;
       }
+
+      // Persist the evaluation so it is queryable (evaluation_score) and so
+      // plan() can use the explanation as the video-angle fallback.
+      this.db.prepare(
+        "UPDATE content_items SET evaluation_score = ?, evaluation_reason = ?, updated_at = datetime('now') WHERE id = ?"
+      ).run(score, reason, item.id);
 
       transition(this.db, item.id, 'evaluated', {
         actor: `engine:${this.name}`,
@@ -241,7 +273,7 @@ export class ContentEngine extends BaseEngine {
 
       requestGate(this.db, 'idea_approval', 'content_item', item.id, {
         requestedBy: `engine:${this.name}`,
-        note: `score ${score}/100 — auto-evaluated by Content Engine`,
+        note: `score ${score}/100 — ${reason}`,
       });
 
       this.log('evaluate', {
@@ -370,6 +402,17 @@ export class ContentEngine extends BaseEngine {
 
       if (dryRun) { processed++; continue; }
 
+      // Quality floor: notes must carry real substance before the item moves.
+      const check = this._checkResearchNotes(item.research_notes);
+      if (!check.ok) {
+        this.log('research', {
+          targetType: 'content_item', targetId: item.id, status: 'skipped',
+          message: `research notes rejected — ${check.error}`,
+        });
+        skipped++;
+        continue;
+      }
+
       transition(this.db, item.id, 'researched', {
         actor: `engine:${this.name}`,
         reason: 'research complete',
@@ -423,6 +466,19 @@ export class ContentEngine extends BaseEngine {
 
       if (dryRun) { processed++; continue; }
 
+      // Quality floor: refuse structurally invalid scripts BEFORE they can
+      // reach the human review gate. The rejection reason is logged so the
+      // agent knows exactly what to fix.
+      const check = this._validateScript(this._parseScript(item.script), item);
+      if (!check.ok) {
+        this.log('script', {
+          targetType: 'content_item', targetId: item.id, status: 'skipped',
+          message: `script rejected by structural check — ${check.error}`,
+        });
+        skipped++;
+        continue;
+      }
+
       transition(this.db, item.id, 'scripted', {
         actor: `engine:${this.name}`,
         reason: 'script finalized',
@@ -442,6 +498,108 @@ export class ContentEngine extends BaseEngine {
         : `scripted ${processed} item(s), skipped ${skipped}`,
     });
     return { processed, skipped };
+  }
+
+  // =========================================================================
+  // READY — move gate-approved scripts into the shoot-ready queue
+  // -------------------------------------------------------------------------
+  // The engine's output is READY TO SHOOT. Items reach `scripted` when their
+  // script is finalized; they become shoot-ready only after a human approves
+  // the script_review gate. This action performs that final transition for
+  // every scripted item whose latest gate verdict is `approved`.
+  // =========================================================================
+
+  ready({ targetId = null, dryRun = false } = {}) {
+    const where = targetId ? "WHERE id = ? AND status = 'scripted'" : "WHERE status = 'scripted'";
+    const params = targetId ? [targetId] : [];
+    const items = this.db.prepare(`SELECT * FROM content_items ${where} ORDER BY id`).all(...params);
+
+    if (!items.length) {
+      this.log('ready', { message: 'no scripted items waiting to become shoot-ready' });
+      return { processed: 0, skipped: 0 };
+    }
+
+    let processed = 0;
+    let skipped = 0;
+    for (const raw of items) {
+      const item = contentItem(raw);
+
+      if (this._latestGateStatus('script_review', item.id) !== 'approved') {
+        this.log('ready', {
+          targetType: 'content_item', targetId: item.id, status: 'skipped',
+          message: 'script_review gate not approved yet',
+        });
+        skipped++;
+        continue;
+      }
+
+      if (dryRun) { processed++; continue; }
+
+      transition(this.db, item.id, 'ready_to_shoot', {
+        actor: `engine:${this.name}`,
+        reason: 'script approved — ready to shoot',
+      });
+
+      this.log('ready', {
+        targetType: 'content_item', targetId: item.id,
+        message: 'moved to ready_to_shoot',
+      });
+      processed++;
+    }
+
+    this.log('ready', {
+      message: dryRun
+        ? `would move ${processed} item(s) to ready_to_shoot, skip ${skipped} (dry run)`
+        : `${processed} item(s) ready to shoot, skipped ${skipped}`,
+    });
+    return { processed, skipped };
+  }
+
+  // =========================================================================
+  // RESUBMIT — revision loop after a rejected script review
+  // -------------------------------------------------------------------------
+  // When a human rejects the script_review gate, the item stays `scripted`
+  // with a rejected gate. The agent edits the script (directly in the DB),
+  // then calls this action to request a fresh review. Rejected gates remain
+  // as history; each resubmit creates a new pending gate.
+  //
+  // Requires an explicit targetId: blanket-resubmitting every rejected item
+  // would re-request reviews for scripts nobody actually revised.
+  // =========================================================================
+
+  resubmit({ targetId = null, dryRun = false } = {}) {
+    if (!targetId) {
+      throw new Error('resubmit requires { targetId } — name the item whose revised script should be re-reviewed');
+    }
+    const raw = this.db.prepare('SELECT * FROM content_items WHERE id = ?').get(targetId);
+    if (!raw) throw new Error(`content item ${targetId} not found`);
+    const item = contentItem(raw);
+
+    if (item.status !== 'scripted') {
+      throw new Error(`item ${item.id} is '${item.status}', expected 'scripted'`);
+    }
+    if (this._latestGateStatus('script_review', item.id) !== 'rejected') {
+      throw new Error(`item ${item.id} has no rejected script_review to resubmit`);
+    }
+    if (!item.script) {
+      throw new Error(`item ${item.id} has no script to resubmit`);
+    }
+
+    if (dryRun) {
+      this.log('resubmit', { message: `would re-request script_review for item ${item.id} (dry run)` });
+      return { processed: 1 };
+    }
+
+    requestGate(this.db, 'script_review', 'content_item', item.id, {
+      requestedBy: `engine:${this.name}`,
+      note: 'revised script — re-requesting review after rejection',
+    });
+
+    this.log('resubmit', {
+      targetType: 'content_item', targetId: item.id,
+      message: 'fresh script_review gate requested',
+    });
+    return { processed: 1 };
   }
 
   // =========================================================================
@@ -470,49 +628,190 @@ export class ContentEngine extends BaseEngine {
     return result;
   }
 
-  _isGateApproved(gateType, itemId) {
+  _loadScriptFramework() {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'script_framework'").get();
+    if (!row) return null;
+    try { return JSON.parse(row.value); }
+    catch { return null; }
+  }
+
+  /**
+   * Parse the stored script string. The content contract is structured JSON:
+   * { hook, script, points[], cta, shot_notes }. Plain-text scripts are not
+   * valid under the contract and are rejected with a clear error.
+   */
+  _parseScript(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Structural check for research notes: enough substance, no template junk.
+   */
+  _checkResearchNotes(notes) {
+    const text = String(notes).trim();
+    if (text.length < MIN_RESEARCH_CHARS) {
+      return { ok: false, error: `notes too thin (${text.length} chars — need at least ${MIN_RESEARCH_CHARS})` };
+    }
+    for (const { re, label } of PLACEHOLDER_PATTERNS) {
+      if (re.test(text)) return { ok: false, error: `placeholder content detected: ${label}` };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Structural check for a parsed script object. Returns { ok, error }.
+   *
+   * Enforces the writing guide's shape requirements so the human review gate
+   * only ever sees complete scripts:
+   *   - required fields: hook, script, cta, shot_notes (non-empty strings)
+   *   - points: non-empty array, every point titled
+   *   - no placeholder/template markers
+   *   - narration word count within tolerance of desired_length_seconds,
+   *     using words-per-second + tolerance from settings.script_framework
+   *     when present (defaults: 2.5 words/sec, ±20%)
+   */
+  _validateScript(parsed, item) {
+    if (!parsed) {
+      return { ok: false, error: 'script must be structured JSON: { hook, script, points[], cta, shot_notes }' };
+    }
+
+    for (const field of ['hook', 'script', 'cta', 'shot_notes']) {
+      if (typeof parsed[field] !== 'string' || !parsed[field].trim()) {
+        return { ok: false, error: `missing or empty '${field}'` };
+      }
+    }
+    if (!Array.isArray(parsed.points) || parsed.points.length < 1) {
+      return { ok: false, error: "'points' must be a non-empty array" };
+    }
+    for (let i = 0; i < parsed.points.length; i++) {
+      const p = parsed.points[i];
+      if (!p || typeof p !== 'object' || typeof p.title !== 'string' || !p.title.trim()) {
+        return { ok: false, error: `points[${i}] needs a non-empty 'title'` };
+      }
+    }
+
+    // Placeholder scan. Core fields get the full list; shot_notes skip the
+    // literal word "placeholder" because notes may legitimately reference
+    // placeholder media ("drop in placeholder screenshot").
+    const coreText = [parsed.hook, parsed.script, parsed.cta,
+      ...parsed.points.map((p) => `${p.title} ${p.detail ?? ''}`)].join('\n');
+    for (const { re, label } of PLACEHOLDER_PATTERNS) {
+      if (re.test(coreText)) return { ok: false, error: `placeholder content detected: ${label}` };
+    }
+    for (const { re, label } of PLACEHOLDER_PATTERNS.filter((p) => p.label !== 'placeholder marker')) {
+      if (re.test(parsed.shot_notes)) return { ok: false, error: `placeholder content in shot_notes: ${label}` };
+    }
+
+    // Length math.
+    const framework = this._loadScriptFramework();
+    const lm = framework?.length_math ?? {};
+    const wps = Number(lm.spoken_words_per_second) > 0 ? Number(lm.spoken_words_per_second) : 2.5;
+    const tolerance = parseTolerance(lm.tolerance) ?? 0.2;
+    const seconds = Number(item.desired_length_seconds) > 0 ? Number(item.desired_length_seconds) : 60;
+    const words = parsed.script.trim().split(/\s+/).length;
+    const target = seconds * wps;
+    const min = Math.floor(target * (1 - tolerance));
+    const max = Math.ceil(target * (1 + tolerance));
+    if (words < min || words > max) {
+      return {
+        ok: false,
+        error: `narration is ${words} spoken words — expected ${min}-${max} for a ${seconds}s item at ${wps} words/sec`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  _latestGateStatus(gateType, itemId) {
     const row = this.db.prepare(
       "SELECT status FROM gates WHERE gate_type = ? AND target_type = 'content_item' " +
       'AND target_id = ? ORDER BY id DESC LIMIT 1'
     ).get(gateType, itemId);
-    return row !== undefined && row.status === 'approved';
+    return row?.status ?? null;
   }
 
-  _scoreItem(item, weights, rules) {
+  _isGateApproved(gateType, itemId) {
+    return this._latestGateStatus(gateType, itemId) === 'approved';
+  }
+
+  /**
+   * Score an idea 0-100 and explain why. Returns { score, reason } where
+   * `reason` lists every non-zero contribution — it is stored as
+   * evaluation_reason and doubles as plan()'s angle fallback.
+   */
+  _scoreItem(item, weights, rules, settings = {}) {
+    const parts = [];
+    const add = (label, points) => {
+      if (points > 0) parts.push(`${label} +${Math.round(points * 10) / 10}`);
+      return points;
+    };
+
     let score = 0;
-    const knownPillars = rules.filter((r) => r.dimension === 'pillar').map((r) => r.dimension_value);
+
+    // Pillar relevance: known pillars come from settings.pillars (always
+    // present on a seeded production DB) plus any playbook pillar rules.
+    // Playbook rules alone would leave a fresh production DB with no
+    // known pillars at all.
+    const settingPillars = Array.isArray(settings.pillars) ? settings.pillars : [];
+    const playbookPillars = rules.filter((r) => r.dimension === 'pillar').map((r) => r.dimension_value);
+    const knownPillars = [...new Set([...settingPillars, ...playbookPillars])];
     if (item.pillar && knownPillars.includes(item.pillar)) {
-      score += weights.pillarRelevance;
+      score += add(`pillar ${item.pillar}`, weights.pillarRelevance);
     } else if (item.pillar) {
-      score += weights.pillarRelevance * 0.5;
+      score += weights.pillarRelevance * 0.5; // unknown pillar — half credit
     }
+
     const srcScore = SOURCE_SCORES[item.source] ?? 50;
-    score += (srcScore / 100) * weights.audienceInterest;
+    score += add(`audience source ${item.source}`, (srcScore / 100) * weights.audienceInterest);
+
     const trendingTopics = rules.filter((r) => r.dimension === 'topic').map((r) => r.dimension_value);
     const itemTags = item.tags ?? [];
     const trendHits = itemTags.filter((t) => trendingTopics.includes(t)).length;
-    score += Math.min(1, trendHits / 3) * weights.trendPotential;
+    score += add(`trend ${trendHits}/3 tags`, Math.min(1, trendHits / 3) * weights.trendPotential);
+
     const authorityPillars = rules.filter((r) => r.dimension === 'pillar' && r.effect === 'up').map((r) => r.dimension_value);
-    if (item.pillar && authorityPillars.includes(item.pillar)) score += weights.authorityFit;
+    if (item.pillar && authorityPillars.includes(item.pillar)) score += add('authority fit', weights.authorityFit);
+
     const engagingHooks = rules.filter((r) => r.dimension === 'hook_style' && r.effect === 'up').map((r) => r.dimension_value);
-    if (item.hook_style && engagingHooks.includes(item.hook_style)) score += weights.engagementPotential;
+    if (item.hook_style && engagingHooks.includes(item.hook_style)) score += add(`hook ${item.hook_style}`, weights.engagementPotential);
+
     const prioScores = { high: 1.0, medium: 0.6, low: 0.3 };
-    score += (prioScores[item.priority] ?? 0.5) * weights.businessValue;
+    score += add(`priority ${item.priority ?? 'medium'}`, (prioScores[item.priority] ?? 0.5) * weights.businessValue);
+
     const sourceCount = this.db.prepare('SELECT COUNT(*) AS n FROM content_items WHERE source = ?').get(item.source)?.n ?? 0;
-    score += Math.max(0, 1 - sourceCount / 10) * weights.novelty;
-    return Math.round(Math.min(100, Math.max(0, score)));
+    score += add('novelty', Math.max(0, 1 - sourceCount / 10) * weights.novelty);
+
+    return {
+      score: Math.round(Math.min(100, Math.max(0, score))),
+      reason: parts.length ? parts.join(' · ') : 'no scoring signals',
+    };
   }
 
   _buildPlan(item, rules, settings) {
     const plan = {};
     const hookRules = rules.filter((r) => r.dimension === 'hook_style' && r.effect === 'up')
       .sort((a, b) => (b.magnitude ?? 1) - (a.magnitude ?? 1));
-    plan.hook_style = item.hook_style ?? hookRules[0]?.dimension_value ?? 'question';
+    const preferredHooks = Array.isArray(settings.hooks_preferred) ? settings.hooks_preferred : [];
+    plan.hook_style = item.hook_style
+      ?? hookRules[0]?.dimension_value      // learned from performance data
+      ?? preferredHooks[0]                  // creator's stated preference order
+      ?? 'question';
     const formatRules = rules.filter((r) => r.dimension === 'format' && r.effect === 'up')
       .sort((a, b) => (b.magnitude ?? 1) - (a.magnitude ?? 1));
     plan.format = item.format ?? formatRules[0]?.dimension_value ?? 'talking_head';
+    // Pillar: keep what the item declares; else match its tags against the
+    // configured pillars; else playbook default; else first configured pillar.
+    // Never invent a pillar that is not one of the brand's real ones.
+    const settingPillars = Array.isArray(settings.pillars) ? settings.pillars : [];
+    const tagMatch = (item.tags ?? []).find((t) => settingPillars.includes(t));
     const pillarRules = rules.filter((r) => r.dimension === 'pillar');
-    plan.pillar = item.pillar ?? pillarRules[0]?.dimension_value ?? 'general';
+    plan.pillar = item.pillar ?? tagMatch ?? pillarRules[0]?.dimension_value ?? settingPillars[0] ?? null;
     const lengthRules = rules.filter((r) => r.dimension === 'length' && r.effect === 'up');
     plan.desired_length_seconds = item.desired_length_seconds
       ?? (lengthRules[0] ? Number(lengthRules[0].dimension_value) : null)
