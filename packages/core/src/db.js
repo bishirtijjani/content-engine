@@ -16,7 +16,7 @@ export const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 export const DEFAULT_DB_PATH = path.join(PROJECT_ROOT, 'data', 'content.db');
 const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 const INDEXES_FILE = path.join(__dirname, 'indexes.sql');
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Migrations — run after the schema file (which creates new tables with
@@ -33,6 +33,15 @@ const MIGRATIONS = [
       addColumn(db, 'engagement_items', 'content_item_id', 'INTEGER REFERENCES content_items(id) ON DELETE SET NULL');
       addColumn(db, 'insights', 'evidence_count', 'INTEGER NOT NULL DEFAULT 0');
       addColumn(db, 'insights', 'last_confirmed_at', 'TEXT');
+    },
+  },
+  {
+    version: 3,
+    up(db) {
+      // The agent-written production plan (structured JSON) for the production
+      // engine: captions/emphasis, overlays (templates + b-roll), zooms, sfx.
+      // Mirrors how `script` holds the agent-written script for the content engine.
+      addColumn(db, 'content_items', 'video_plan', 'TEXT');
     },
   },
 ];

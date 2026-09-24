@@ -25,7 +25,7 @@ CONTENT ENGINE      PRODUCTION ENGINE    DISTRIBUTION ENGINE
 | Engine | Question | Pipeline | Output |
 |---|---|---|---|
 | **Content** | "What should we create?" | Discover → Evaluate → Plan → Research → Script | Ready-to-shoot scripts (agent-written) |
-| **Production** | "How do we turn footage into finished content?" | Session → Recordings → Edit → Captions → Platform assets | Finished cuts per platform |
+| **Production** | "How do we turn footage into finished content?" | Attach footage → Agent plan → Assemble → Render → Mix sound → Review | Finished cuts (long + vertical shorts) |
 | **Distribution** | "Where, when, and how?" | Adapt → Schedule → Publish → Cross-post | Published posts |
 | **Engagement** | "What happens after people interact?" | Monitor → Classify → Reply / Escalate / Save idea | Resolved engagement + leads + new ideas |
 | **Analytics** | "What actually happened?" | Collect → Analyze → Insights → Playbook rules | Knowledge fed back into Content |
@@ -238,6 +238,97 @@ engine.run({ dryRun: true });                         // preview without changes
 
 ---
 
+## The Cleaning step (implemented)
+
+Before production, one raw recording becomes one clean video. Put one video and the separate audio recording in `data/<name>/`; the cleaner syncs them (sample-accurate, drift-corrected) and cuts the pauses and wrong takes.
+
+```bash
+npm run clean -- data/vid1            # propose: print the cut list, cut nothing
+npm run clean -- data/vid1 --apply    # cut, after the human approves
+```
+
+- It adds no captions and no overlays — it only syncs and cuts. Production does the rest.
+- **Pauses come from measured audio silence, never from transcript gaps**, so a word the speech model missed can never be cut.
+- **It never writes to its inputs** — the video and the audio are read-only, and it refuses any output equal to an input.
+- Always show the cut list and get the human's yes before `--apply`.
+- Thresholds live in `config/style.json` under `clean`. Steps are cached next to the video; only the cut re-encodes.
+- Output: `data/<name>/<name>.cleaned.mp4` (+ `cleaned.transcript.json`, reused by `edit()` for captions).
+
+---
+
+## The Production Engine (implemented)
+
+The Production Engine answers "How do we turn a recording into a finished video?" It is the single home for production.
+
+```js
+import { connect } from '@content-os/core';
+import { ProductionEngine } from '@content-os/engine-production';
+const engine = new ProductionEngine(connect());
+
+engine.listFootage();                          // video files waiting in data/
+engine.processFootage({ targetId, filePath }); // attach the cleaned file -> shot
+engine.edit({ targetId });                     // build + render the agent's plan -> editing
+engine.makeShort({ targetId, start, end });    // package a range as a 9:16 short
+engine.requestReview({ targetId });            // asset_review gate
+engine.schedule({ targetId });                 // after approval -> scheduled
+```
+
+- The engine never writes content. The agent writes a **plan** (`content_items.video_plan`); the engine checks it against the locked style, builds one composition (untouched footage + captions + overlays + zooms), renders it, and lays sound effects under the voice.
+- The engine never cuts footage. It only adds layers on top.
+- **Doctrine:** everything on screen must earn its place — every overlay carries a one-line `why`. On-screen content is only screenshots, screen recordings, your own video, graphics, and diagrams. No stock footage. All of it sits on the burnt orange canvas; visuals never enter the caption band.
+- `config/style.json` is the ONE style file. Per-video choices live in the plan.
+- The backdrop is a designed file, `backdrop/brand.svg` (a grid with depth), and the base layer of every composition. The talking head is full-screen and covers it; the backdrop shows during take-over (video hidden) and split (video inset). Edit the one SVG to change the look.
+- **Visuals are per video.** They are not stockpiled. When footage is attached, the engine makes a `<video>.visuals/` folder next to it; drop that video's screenshots, screen recordings, and clips there and point the plan's `file` at them. `templates/` holds the drawn graphics; `assets/sfx/` holds reusable sounds (rebuild with `npm --workspace @content-os/engine-production run catalog`).
+
+### Plan contract
+
+`content_items.video_plan` is structured JSON (all fields optional — an empty plan is a plain captioned video). Two overlay kinds: `visual` (a file for that video) and `graphic` (a drawn template); each carries a `why`.
+
+```json
+{ "captions": { "emphasis": ["automated", "30 seconds"] },
+  "overlays": [
+    { "start": 12, "end": 18, "kind": "graphic", "name": "stat-callout",
+      "why": "show the hours saved",
+      "fields": { "value": "8 hrs", "label": "saved per week" } },
+    { "start": 30, "end": 36, "kind": "visual", "file": "data/myvideo.visuals/dashboard.png",
+      "why": "show the real dashboard" } ],
+  "zooms": [ { "at": 12, "scale": 1.15 } ],
+  "sfx":   [ { "at": 12, "sound": "whoosh" } ] }
+```
+
+`validatePlan()` refuses anything off-style (wrong length, overlapping overlays, unknown graphic, unknown field, unknown frame, missing or filler purpose, too many zooms, bad scale). Nothing renders if the plan fails.
+
+### Frames and modes
+
+Every overlay snaps into one of four frames; the model never sets a size or position. A graphic gets its frame from the template, a visual picks one.
+
+| Frame | Mode | What goes there |
+|---|---|---|
+| `full` | take over | screenshots, screen recordings, diagrams, charts |
+| `center` | take over | big stat, quote, CTA, title, prompt |
+| `left` | split | a supporting visual or note; face on the right |
+| `right` | split | a supporting visual or button; face on the left |
+
+Take over hides the video and fills the frame on the orange; split insets the video to the far side.
+
+### Menu and builder
+
+```js
+engine.menu({ targetId });   // frames, templates (name/fields/frame), this video's visuals, sound cues
+
+const plan = engine.newPlan()
+  .caption({ emphasis: ['automated'] })
+  .graphic({ at: [12, 18], name: 'stat-callout', fields: { value: '8 hrs', label: 'saved' }, why: 'show the hours saved' })
+  .visual({ at: [30, 36], frame: 'full', file: 'data/myvideo.visuals/dashboard.png', why: 'show the real dashboard' })
+  .zoom({ at: 12, scale: 1.15 })
+  .sfx({ at: 12, sound: 'whoosh' });
+engine.savePlan({ targetId, plan });   // validates against the menu, then stores
+```
+
+18 templates ship: cards (`stat-callout`, `key-point`, `text-box`, `quote-card`, `title-card`, `cta-card`), lists (`step-list`, `checklist`, `timeline`), prompts (`comment-prompt`, `link-prompt`, `callout`), buttons (`subscribe-button`, `follow-button`), diagrams (`flow`, `before-after`, `comparison`), people (`lower-third`).
+
+---
+
 ## Script renderer
 
 The script renderer takes a shooting script and produces a presentable Markdown document, served in a local browser with a live editor.
@@ -269,7 +360,7 @@ Features:
 
 ```bash
 npm install              # links workspace packages (no external deps)
-npm test                 # run all tests (55 passing)
+npm test                 # run all tests (167 passing)
 ```
 
 ### Seed your brand
@@ -282,6 +373,13 @@ npm run seed             # brand profile + script framework + idea framework (no
 
 ```bash
 node demo.mjs              # runs the full Content Engine pipeline, renders a script in the browser
+```
+
+### Clean a recording
+
+```bash
+npm run clean -- data/vid1            # propose: print the cut list, cut nothing
+npm run clean -- data/vid1 --apply    # cut, after the human approves
 ```
 
 ### Smoke test
@@ -327,7 +425,13 @@ content-os/
     │   └── test/
     │       ├── content.test.js   38 engine tests
     │       └── lifecycle.test.js 5 lifecycle + render tests
-    ├── engine-production/        skeleton — session → recordings → finished assets
+    ├── engine-production/        implemented — clean → footage → plan → assemble → render → mix → review
+    │   ├── config/style.json     THE locked style (colors, fonts, captions, cards, motion, sfx, grade, clean, voice)
+    │   ├── src/                  index.js (engine), plan.mjs, plan-builder.mjs, menu.mjs, assemble.mjs, mix.mjs, build-captions.mjs, templates.mjs, library.mjs, style.mjs
+    │   ├── tools/clean/          the cleaner CLI (clean.mjs + align.py/place.py/silence.py, lib/cut.mjs, lib/guard.mjs)
+    │   ├── assets/sfx/           reusable sounds (+ catalog.json)
+    │   ├── backdrop/brand.svg    the designed base layer (grid with depth)
+    │   └── templates/            18 on-brand graphics (cards, lists, prompts, buttons, diagrams, people)
     ├── engine-distribution/      skeleton — adapt → schedule → publish → cross-post
     ├── engine-engagement/        skeleton — monitor → classify → reply → escalate
     └── engine-analytics/         skeleton — collect → analyze → insights → playbook
@@ -338,14 +442,17 @@ content-os/
 ## Testing
 
 ```bash
-npm test                 # 55 tests across core + engine-content + lifecycle
+npm test                 # 167 tests across core + engine-content + engine-production + lifecycle
 ```
 
 | Package | Tests | What they cover |
 |---|---|---|
 | `@content-os/core` | 12 | Transitions, gates, lifecycle, retry, fast-track |
 | `@content-os/engine-content` | 38 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
+| `@content-os/engine-production` | 112 | Cleaning (cut list, input guard), footage attach, plan validation, assembler, templates, sfx mix, library, captions, review/resubmit/schedule, make_short |
 | Lifecycle | 5 | Full lifecycle with all 3 gates, batch production, fast-track, illegal jumps, Markdown rendering |
+
+The cleaning steps also have Python self-tests (not run by `npm test`): `python packages/engine-production/tools/clean/test_align.py` and `test_place.py`.
 
 ---
 
@@ -367,7 +474,8 @@ The system is seeded with a real brand profile:
 | Engine | Status | Actions implemented |
 |---|---|---|
 | Content | **Fully implemented** | addIdeas, discover, evaluate (7-dim scoring, persisted), plan (playbook + settings fallbacks), research/script (finalize + structural validation), ready, resubmit |
-| Production | Stubbed | Contract defined — session → recordings → assets |
+| Cleaning | **Implemented** | align (sample-accurate + drift), place, silence (from audio), transcribe, cut list (pauses/fillers/retakes) — `npm run clean` |
+| Production | **Implemented** | process_footage, list_footage, menu, save_plan, edit (plan-validated assemble + render + sfx mix), make_short, request_review, resubmit, schedule |
 | Distribution | Stubbed | Contract defined — adapt → schedule → publish → cross-post |
 | Engagement | Stubbed | Contract defined — monitor → classify → reply → escalate |
 | Analytics | Stubbed | Contract defined — collect → analyze → insights → playbook |
@@ -387,11 +495,13 @@ The system is seeded with a real brand profile:
 
 ## Status
 
-- **Foundation:** complete — schema v2, enforced state machine, human gates, batch production model
+- **Foundation:** complete — schema v3, enforced state machine, human gates, batch production model
 - **Content Engine:** production-ready — fresh ideas each cycle, scoring persisted, structural validation on research/scripts, full state coverage (idea → ready_to_shoot) including the revision loop
-- **Content contract:** the engine never writes content — the agent generates ideas and writes research notes and scripts; the engine finalizes and requests gates
-- **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing` skill encode the full loop for any agent tool
-- **Tests:** 55/55 passing
+- **Cleaning:** implemented — syncs the separate audio to the video (sample-accurate, drift-corrected), measures silence from the audio, and proposes pauses/fillers/repeated takes for approval before cutting; never modifies its inputs
+- **Production Engine:** implemented — footage → agent plan → plan-validated assemble → render → sfx mix → review → schedule, plus vertical shorts; one locked style file, an asset library, and a template book
+- **Content contract:** the engine never writes content — the agent generates ideas, writes research notes and scripts, and writes the production plan; the engine finalizes and requests gates
+- **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing` and `.opencode/skills/clean-recording` skills encode the full loop for any agent tool
+- **Tests:** 167/167 passing
 - **Other engines:** stubbed with clear contracts, ready to build
 
 See [architecture.md](architecture.md) for the recommended build order.

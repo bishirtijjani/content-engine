@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bd-base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#EE6414"/>
+      <stop offset="55%" stop-color="#EA580C"/>
+      <stop offset="100%" stop-color="#C94A08"/>
+    </linearGradient>
+
+    <radialGradient id="bd-glow-warm" cx="16%" cy="10%" r="60%">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.40"/>
+      <stop offset="55%" stop-color="#F59E0B" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="bd-glow-cool" cx="88%" cy="94%" r="62%">
+      <stop offset="0%" stop-color="#0f4c81" stop-opacity="0.26"/>
+      <stop offset="60%" stop-color="#0f4c81" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#0f4c81" stop-opacity="0"/>
+    </radialGradient>
+
+    <pattern id="bd-grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M80 0H0V80" fill="none" stroke="#FDE68A" stroke-opacity="0.10" stroke-width="1"/>
+    </pattern>
+
+    <radialGradient id="bd-vignette" cx="50%" cy="42%" r="78%">
+      <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.30"/>
+    </radialGradient>
+
+    <filter id="bd-grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0.6 0.6 0.6 0 0"/>
+    </filter>
+  </defs>
+
+  <rect width="1080" height="1920" fill="url(#bd-base)"/>
+  <rect width="1080" height="1920" fill="url(#bd-glow-warm)"/>
+  <rect width="1080" height="1920" fill="url(#bd-glow-cool)"/>
+  <rect width="1080" height="1920" fill="url(#bd-grid)"/>
+  <rect width="1080" height="1920" fill="url(#bd-vignette)"/>
+  <rect width="1080" height="1920" filter="url(#bd-grain)" opacity="0.06"/>
+</svg>

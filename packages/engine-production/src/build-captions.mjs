@@ -1,55 +1,26 @@
-// build-captions.mjs — transcript.json -> a renderable HyperFrames composition,
-// styled to the Bishir Tijjani caption spec:
+// build-captions.mjs — transcript -> the caption layer of a composition,
+// styled to the Bishir Tijjani caption spec (all values come from config/style.json):
 //
 //   - mostly navy, ALL-CAPS Montserrat 800/900
-//   - NO box / no background — heavy drop shadow only (--cap-shadow)
-//   - one CLAUSE at a time (grouping lives in ./lib/captions.mjs, regression-tested)
-//   - emphasis compound term much bigger, on its own line, in accent (orange)
-//   - centered low-third (y ~= h * 0.72)
+//   - NO box / no background — heavy drop shadow only
+//   - one CLAUSE at a time (grouping lives in ../tools/lib/captions.mjs, regression-tested)
+//   - emphasis compound term much bigger, on its own line, in accent
+//   - centered in the caption band (style.captions.band.top, default 72%)
+//
+// Two consumers:
+//   - buildCaptionLayer()   -> just the caption CSS + clips, for the assembler
+//   - buildCaptionsComposition() -> a whole captioned composition (video + captions)
 //
 // Caption scenes come from the tested clause splitter, and validateCaptions() is a
 // HARD GATE: if any scene breaks a clause, dangles a function word, or over-emphasizes,
-// this script throws and nothing renders. See tools/captions.test.mjs.
+// this throws and nothing renders.
 import fs from "node:fs";
-import path from "node:path";
 import { groupCaptions, validateCaptions } from "../tools/lib/captions.mjs";
-
-const DEFAULT_CONFIG = {
-  brand: {
-    name: "Bishir Tijjani",
-    account: "founder",
-    colors: {
-      bg: "#EA580C",
-      surface: "#F59E0B",
-      text: "#FFFFFF",
-      muted: "#FFFFFF",
-      orange: "#EA580C",
-      blue: "#0f4c81",
-    },
-    fonts: {
-      display: "Montserrat",
-      body: "Plus Jakarta Sans",
-      mono: "JetBrains Mono",
-    },
-  },
-  captions: {
-    model: "base.en",
-    language: "en",
-    style: "codeket-locked",
-    emphasis: ["AI automation", "AI engineer", "Bishir Tijjani"],
-    maxEmphasisPerPhrase: 1,
-    font: { baseRatio: 0.052, emphRatio: 1.8, plainWeight: 600, emphWeight: 900 },
-    grouping: {
-      maxWords: 5,
-      maxChars: 30,
-      pauseGap: 0.7,
-      minDuration: 0.6,
-      hold: 0.15,
-    },
-  },
-};
+import { loadStyle } from "./style.mjs";
 
 const MUSIC = /^[♪♫♬♩♧\s]+$/;
+const r3 = (n) => Math.round(n * 1000) / 1000;
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
  * Load and apply lexicon corrections to a transcript.
@@ -78,90 +49,61 @@ export function loadTranscript(words, lexiconPath) {
 }
 
 /**
-   * Build a HyperFrames composition HTML from a transcript, with Bishir Tijjani caption spec.
- * @param {Object} opts
- * @param {Array} opts.words - Transcript words [{text, start, end}]
- * @param {string} opts.videoSrc - Path to the source video
- * @param {number} opts.width - Video width
- * @param {number} opts.height - Video height
- * @param {string} opts.title - Composition title
- * @param {string} [opts.configPath] - Path to videoer.config.json
- * @param {string} [opts.lexiconPath] - Path to lexicon.json
- * @param {number} [opts.duration] - Total duration in seconds
- * @param {string} [opts.account] - Brand account (founder/agency)
- * @param {boolean} [opts.audioOnly] - Source is audio-only (no video stream).
- *   Omits the <video> a-roll element so the renderer does not expect a real
- *   video file; captions become the visual layer.
- * @returns {{ html: string, sceneCount: number, emphasisCount: number, leadColor: string }}
+ * Transcript words -> caption scenes (with timing), plus the accent colors.
+ * Throws if any caption breaks a rule.
+ *
+ * @returns {{ lines, duration, sceneCount, emphasisCount, leadColor, secondColor, grouping }}
  */
-export function buildCaptionsComposition(opts) {
-  const {
-    words: rawWords,
-    videoSrc,
-    width,
-    height,
-    title = "Bishir Tijjani video",
-    configPath,
-    lexiconPath,
-    duration: explicitDuration,
-    account: accountOverride,
-    audioOnly = false,
-    emphasis: emphasisOverride,
-  } = opts;
-
-  if (!rawWords || !width || !height) {
-    throw new Error("buildCaptionsComposition requires: words, width, height");
-  }
-
-  const cfg = configPath && fs.existsSync(configPath)
-    ? { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(configPath, "utf8")) }
-    : DEFAULT_CONFIG;
-
-  const brand = cfg.brand || DEFAULT_CONFIG.brand;
-  const capCfg = cfg.captions || DEFAULT_CONFIG.captions;
+export function computeCaptionScenes({
+  words: rawWords,
+  width,
+  style,
+  lexiconPath,
+  emphasis,
+  duration: explicitDuration,
+}) {
+  const s = style ?? loadStyle();
+  const brand = s.brand ?? {};
+  const capCfg = s.captions ?? {};
   const g = {
     maxWords: 5, maxChars: 30, pauseGap: 0.7, minDuration: 0.6, hold: 0.15,
     ...(capCfg.grouping || {}),
   };
-  const maxEmph = capCfg.maxEmphasisPerPhrase ?? 1;
 
-  const account = accountOverride || brand.account || "founder";
+  const account = brand.account || "founder";
   const ORANGE = brand.colors?.orange || "#EA580C";
   const NAVY = brand.colors?.blue || "#0f4c81";
-  const LEAD = account === "agency" ? ORANGE : NAVY;
-  const SECOND = account === "agency" ? NAVY : ORANGE;
+  const leadColor = account === "agency" ? ORANGE : NAVY;
+  const secondColor = account === "agency" ? NAVY : ORANGE;
 
-  // Load + clean transcript, apply lexicon
   const words = loadTranscript(rawWords, lexiconPath);
   const duration = Number(explicitDuration) || (words.length ? words[words.length - 1].end + 0.4 : 1);
 
-  // Group into caption scenes + HARD-GATE validate
   const gOpts = {
-    emphasis: emphasisOverride ?? capCfg.emphasis ?? [],
+    emphasis: emphasis ?? capCfg.emphasis ?? [],
     maxWords: g.maxWords,
     maxChars: g.maxChars,
     pauseGap: g.pauseGap,
-    maxEmphasisPerPhrase: maxEmph,
+    maxEmphasisPerPhrase: capCfg.maxEmphasisPerPhrase ?? 1,
   };
   const caps = groupCaptions(words, gOpts);
   const problems = validateCaptions(caps, gOpts);
   if (problems.length) {
     throw new Error(
       `[build-captions] REFUSING TO BUILD — ${problems.length} caption rule violation(s):\n` +
-      problems.map((p) => `  ✗ ${p}`).join("\n")
+      problems.map((p) => `  x ${p}`).join("\n")
     );
   }
 
-  // Token scenes -> plain/emph lines with timing
-  const r3 = (n) => Math.round(n * 1000) / 1000;
-  let emphCount = 0;
+  let emphasisCount = 0;
   const lines = caps.map((c) => {
     const segs = [];
     let buf = [];
     for (const t of c) {
       if (t.emph) {
         if (buf.length) { segs.push({ type: "plain", text: buf.join(" ") }); buf = []; }
-        segs.push({ type: "emph", text: t.text.replace(/[.,;:!?]+$/, ""), color: emphCount++ % 2 === 0 ? LEAD : SECOND });
+        segs.push({ type: "emph", text: t.text.replace(/[.,;:!?]+$/, "") });
+        emphasisCount++;
       } else buf.push(t.text);
     }
     if (buf.length) segs.push({ type: "plain", text: buf.join(" ") });
@@ -170,32 +112,112 @@ export function buildCaptionsComposition(opts) {
 
   for (let i = 0; i < lines.length; i++) {
     const L = lines[i];
-    L.end = Math.min(Math.max(L.end, L.start + g.minDuration) + g.hold, i + 1 < lines.length ? lines[i + 1].start : Infinity, duration);
+    L.end = Math.min(
+      Math.max(L.end, L.start + g.minDuration) + g.hold,
+      i + 1 < lines.length ? lines[i + 1].start : Infinity,
+      duration
+    );
     L.start = r3(L.start);
     L.end = r3(L.end);
     L.dur = r3(Math.max(0.1, L.end - L.start));
   }
 
-  // Emit HTML
-  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return { lines, duration: r3(duration), sceneCount: lines.length, emphasisCount, leadColor, secondColor, grouping: g };
+}
+
+/** The caption CSS (band position, type, shadow). */
+export function renderCaptionCSS(style, width) {
+  const s = style ?? loadStyle();
+  const brand = s.brand ?? {};
+  const capCfg = s.captions ?? {};
   const fontCfg = capCfg.font || {};
   const base = Math.max(14, Math.round(width * (fontCfg.baseRatio ?? 0.052)));
   const emph = Math.round(base * (fontCfg.emphRatio ?? 1.8));
   const plainWeight = fontCfg.plainWeight ?? 600;
   const emphWeight = fontCfg.emphWeight ?? 900;
-  const dur = r3(duration);
   const display = brand.fonts?.display || "Montserrat";
+  const bandTop = Math.round((capCfg.band?.top ?? 0.72) * 1000) / 10;
 
-  const capEls = lines
+  return `      :root { --cap-shadow: 0 2px 6px rgba(0,0,0,.85), 0 6px 22px rgba(0,0,0,.75), 0 1px 2px rgba(0,0,0,.9); }
+      .cap {
+        position: absolute; left: 0; right: 0; top: ${bandTop}%; transform: translateY(-50%);
+        display: flex; justify-content: center; padding: 0 6%; box-sizing: border-box;
+      }
+      .cap-inner { display: flex; flex-direction: column; align-items: center; text-align: center; }
+      .l, .e { display: block; font-family: '${display}', system-ui, sans-serif; text-transform: uppercase; text-shadow: var(--cap-shadow); }
+      .l { font-weight: ${plainWeight}; font-size: ${base}px; line-height: 1.15; letter-spacing: 0.02em; color: ${brand.colors?.text || "#FFFFFF"}; opacity: 0.95; }
+      .e { font-weight: ${emphWeight}; font-size: ${emph}px; line-height: 1.02; letter-spacing: -0.01em; }`;
+}
+
+/** The caption clip elements. Emphasis alternates accent colors. */
+export function renderCaptionClips(lines, { leadColor = "#0f4c81", secondColor = "#EA580C" } = {}) {
+  let emphIndex = 0;
+  return lines
     .map((L, i) => {
       const inner = L.segs
-        .map((s) => s.type === "emph"
-          ? `<span class="e" style="color:${s.color}">${esc(s.text)}</span>`
-          : `<span class="l">${esc(s.text)}</span>`)
+        .map((seg) => {
+          if (seg.type === "emph") {
+            const color = emphIndex++ % 2 === 0 ? leadColor : secondColor;
+            return `<span class="e" style="color:${color}">${esc(seg.text)}</span>`;
+          }
+          return `<span class="l">${esc(seg.text)}</span>`;
+        })
         .join("");
       return `      <div id="cap-${i + 1}" class="clip cap" data-start="${L.start}" data-duration="${L.dur}" data-track-index="${5 + (i % 2)}"><div class="cap-inner">${inner}</div></div>`;
     })
     .join("\n");
+}
+
+/**
+ * The caption layer: CSS + clip HTML + scene metadata, ready to drop into a
+ * composition built by the assembler.
+ */
+export function buildCaptionLayer({ words, width, style, lexiconPath, emphasis, duration } = {}) {
+  const s = style ?? loadStyle();
+  const scenes = computeCaptionScenes({ words, width, style: s, lexiconPath, emphasis, duration });
+  return {
+    css: renderCaptionCSS(s, width),
+    html: renderCaptionClips(scenes.lines, scenes),
+    lines: scenes.lines,
+    duration: scenes.duration,
+    sceneCount: scenes.sceneCount,
+    emphasisCount: scenes.emphasisCount,
+    leadColor: scenes.leadColor,
+  };
+}
+
+/**
+ * A whole captioned composition (a-roll + captions). Kept for the simple path
+ * and for audio-only sources where captions are the visual layer.
+ * @returns {{ html, sceneCount, emphasisCount, leadColor }}
+ */
+export function buildCaptionsComposition(opts) {
+  const {
+    words,
+    videoSrc,
+    width,
+    height,
+    title = "Bishir Tijjani video",
+    configPath,
+    lexiconPath,
+    duration: explicitDuration,
+    audioOnly = false,
+    emphasis: emphasisOverride,
+  } = opts;
+
+  if (!words || !width || !height) {
+    throw new Error("buildCaptionsComposition requires: words, width, height");
+  }
+
+  const style = configPath && fs.existsSync(configPath)
+    ? JSON.parse(fs.readFileSync(configPath, "utf8"))
+    : loadStyle();
+  const brand = style.brand ?? {};
+
+  const layer = buildCaptionLayer({
+    words, width, style, lexiconPath, emphasis: emphasisOverride, duration: explicitDuration,
+  });
+  const dur = layer.duration;
 
   const html = `<!doctype html>
 <html lang="en">
@@ -206,18 +228,10 @@ export function buildCaptionsComposition(opts) {
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
       /* Bishir Tijjani caption spec — no box, heavy shadow, ALL-CAPS Montserrat */
-      :root { --cap-shadow: 0 2px 6px rgba(0,0,0,.85), 0 6px 22px rgba(0,0,0,.75), 0 1px 2px rgba(0,0,0,.9); }
+${layer.css}
       body { margin: 0; background: ${brand.colors?.bg || "#0B1220"}; }
       #root { position: relative; width: ${width}px; height: ${height}px; overflow: hidden; background: ${brand.colors?.bg || "#0B1220"}; }
       #a-roll { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      .cap {
-        position: absolute; left: 0; right: 0; top: 72%; transform: translateY(-50%);
-        display: flex; justify-content: center; padding: 0 6%; box-sizing: border-box;
-      }
-      .cap-inner { display: flex; flex-direction: column; align-items: center; text-align: center; }
-      .l, .e { display: block; font-family: '${display}', system-ui, sans-serif; text-transform: uppercase; text-shadow: var(--cap-shadow); }
-      .l { font-weight: ${plainWeight}; font-size: ${base}px; line-height: 1.15; letter-spacing: 0.02em; color: ${brand.colors?.text || "#FFFFFF"}; opacity: 0.95; }
-      .e { font-weight: ${emphWeight}; font-size: ${emph}px; line-height: 1.02; letter-spacing: -0.01em; }
     </style>
   </head>
   <body>
@@ -230,7 +244,7 @@ export function buildCaptionsComposition(opts) {
       data-duration="${dur}"
     >
       ${audioOnly ? '' : `<video id="a-roll" class="clip" src="${videoSrc}" data-start="0" data-duration="${dur}" data-track-index="0" muted playsinline></video>`}
-${capEls}
+${layer.html}
       <audio id="a-roll-audio" src="${videoSrc}" data-start="0" data-duration="${dur}" data-track-index="10" data-volume="1"></audio>
     </div>
     <script>
@@ -241,5 +255,5 @@ ${capEls}
 </html>
 `;
 
-  return { html, sceneCount: lines.length, emphasisCount: emphCount, leadColor: LEAD };
+  return { html, sceneCount: layer.sceneCount, emphasisCount: layer.emphasisCount, leadColor: layer.leadColor };
 }

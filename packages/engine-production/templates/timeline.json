@@ -1,0 +1,8 @@
+{
+  "name": "timeline",
+  "description": "A titled list of points along a rail, one per line",
+  "frame": "full",
+  "fields": ["title", "points"],
+  "html": "<div class=\"tpl-tl\"><div class=\"tpl-tl-title\">{{title}}</div><div class=\"tpl-tl-points\">{{points}}</div></div>",
+  "css": ".tpl-tl{width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box;padding:0 calc(var(--u)*48px)}.tpl-tl-title{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*40px);color:var(--brand-text);margin-bottom:calc(var(--u)*18px)}.tpl-tl-points{border-left:calc(var(--u)*6px) solid var(--brand-orange);padding-left:calc(var(--u)*30px);font-family:var(--brand-body);font-weight:600;font-size:calc(var(--u)*30px);line-height:1.7;color:var(--brand-text);white-space:pre-line}"
+}

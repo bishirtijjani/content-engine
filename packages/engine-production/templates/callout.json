@@ -1,0 +1,8 @@
+{
+  "name": "callout",
+  "description": "A short supporting note",
+  "frame": "left",
+  "fields": ["text"],
+  "html": "<div class=\"tpl-callout\">{{text}}</div>",
+  "css": ".tpl-callout{background:var(--brand-blue);border-left:calc(var(--u)*8px) solid var(--brand-orange);border-radius:calc(var(--u)*10px);padding:calc(var(--u)*28px) calc(var(--u)*34px);box-shadow:0 calc(var(--u)*12px) calc(var(--u)*36px) rgba(0,0,0,.35);font-family:var(--brand-body);font-weight:600;font-size:calc(var(--u)*34px);line-height:1.35;color:var(--brand-text);max-width:100%}"
+}

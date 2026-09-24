@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS content_items (
   evaluation_reason     TEXT,
   research_notes        TEXT,
   script                TEXT,
+  video_plan            TEXT,              -- agent-written production plan (JSON): overlays, zooms, sfx
   shot_instructions     TEXT,              -- b-roll, screen-record, camera notes
   priority              TEXT NOT NULL DEFAULT 'medium',  -- low | medium | high
   tags                  TEXT,              -- JSON array

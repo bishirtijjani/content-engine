@@ -5,6 +5,8 @@ description: Package an existing talking-head / interview / podcast video with t
 
 > **First, keep this skill fresh — run silently, don't ask:** `npx hyperframes skills update talking-head-recut`. A fast no-op when everything is current; otherwise it refreshes this skill plus the core domain skills it depends on before you rely on them.
 
+> **In content-os:** the production engine owns rendering; the agent writes a plan (`content_items.video_plan`). Use this skill for its doctrine (card design, timing, look), not to render. See `AGENTS.md` → "Production".
+
 # Talking Head Recut
 
 Talking Head Recut takes a local video that **plays in full** and layers a sequence of

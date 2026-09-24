@@ -28,7 +28,7 @@ CONTENT ENGINE      PRODUCTION ENGINE    DISTRIBUTION ENGINE
 ```
 
 - **Content Engine** — "What should we create?" Discover → Evaluate → Plan → Research → Script. Output: **READY TO SHOOT**
-- **Production Engine** — "How do we turn the recording into finished content?" Session → recordings → edit → captions → visuals → platform assets. Output: **FINISHED ASSETS**
+- **Production Engine** — "How do we turn the recording into finished content?" Clean the raw recording → attach footage → agent plan → assemble (captions + overlays + zooms) → render → mix sound → human review. Output: **FINISHED ASSETS** (long form + vertical shorts). One locked style file (`config/style.json`); the agent writes the per-video plan (`content_items.video_plan`). The **cleaner** (`npm run clean`) runs first: it syncs the separate high-quality audio to the camera's own scratch audio (sample-accurate, drift-corrected), measures silence from the audio, and proposes pauses/fillers/repeated takes for approval before cutting — it never modifies its inputs and never writes to the database. Doctrine: everything on screen earns its place (each overlay states a `why`); visuals sit on the burnt orange canvas and never enter the caption band; no stock footage.
 - **Distribution Engine** — "Where, when and how?" Adapt → Schedule → Publish → Cross-post. Output: **PUBLISHED POSTS**
 - **Engagement Engine** — "What happens after people interact?" Monitor → Classify → Reply / Escalate / Save idea. Output: **RESOLVED ENGAGEMENT + LEADS + IDEAS**
 - **Analytics** — "What actually happened?" Collect → Analyze → Insights → Playbook rules. Output: **KNOWLEDGE** fed back into Content
@@ -229,7 +229,7 @@ content-os/
 └── packages/
     ├── core/                     THE CONTRACT — schema, state machine, gates, db layer
     ├── engine-content/           discover → evaluate → plan → research → script
-    ├── engine-production/        session → recordings → finished platform assets
+    ├── engine-production/        clean → footage → plan → assemble → render → mix → review (implemented)
     ├── engine-distribution/      adapt → schedule → publish → cross-post
     ├── engine-engagement/        monitor → classify → reply → escalate → save ideas
     └── engine-analytics/         collect → analyze → insights → playbook rules
@@ -237,13 +237,17 @@ content-os/
 
 ## 9. Build order
 
-1. **Foundation + batch model** (done) — schema v2, state machine with
+1. **Foundation + batch model** (done) — schema v3, state machine with
    fast-track, session/recording/calendar/playbook tables, Content Engine, tests
 2. **Analytics** — metrics collection + insight generation + playbook promotion
 3. **Distribution** — YouTube/LinkedIn official APIs; TikTok/Instagram restricted
 4. **Content** — idea discovery + LLM planning/scripting (queries the playbook)
-5. **Production** — captions/transcription first, then editing
-6. **Engagement** — classification + auto-reply + escalation
+5. **Cleaning** (done) — sync the separate audio to the camera (sample-accurate
+   + drift), measure silence from the audio, propose pauses/fillers/retakes, cut
+   after approval. `npm run clean`; never modifies its inputs
+6. **Production** (done) — attach footage, plan-validated assemble (captions +
+   overlays + zooms), render, sfx mix, review, vertical shorts
+7. **Engagement** — classification + auto-reply + escalation
 
 ## 10. Extraction path
 

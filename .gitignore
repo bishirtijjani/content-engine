@@ -1,15 +1,8 @@
 # dependencies
 node_modules/
 
-# database (the content.db is generated — never commit it)
-data/*.db
-data/*.db-journal
-data/*.db-wal
-data/*.db-shm
-
-# generated render artifacts
-data/compositions/
-data/renders/
+# data/ is the footage drop zone + generated database — never commit it
+data/
 videos/
 
 # python false start (removed)

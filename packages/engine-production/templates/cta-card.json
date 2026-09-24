@@ -1,0 +1,8 @@
+{
+  "name": "cta-card",
+  "description": "A closing call to action with the handle",
+  "frame": "center",
+  "fields": ["line", "handle"],
+  "html": "<div class=\"tpl-cta\"><div class=\"tpl-cta-line\">{{line}}</div><div class=\"tpl-cta-handle\">{{handle}}</div></div>",
+  "css": ".tpl-cta{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--brand-orange);border-radius:calc(var(--u)*18px);padding:calc(var(--u)*44px) calc(var(--u)*60px);box-shadow:0 calc(var(--u)*18px) calc(var(--u)*50px) rgba(0,0,0,.35)}.tpl-cta-line{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*54px);line-height:1.15;color:var(--brand-text)}.tpl-cta-handle{margin-top:calc(var(--u)*16px);font-family:var(--brand-body);font-weight:700;font-size:calc(var(--u)*32px);color:var(--brand-blue)}"
+}

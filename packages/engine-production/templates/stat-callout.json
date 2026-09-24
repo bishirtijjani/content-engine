@@ -1,0 +1,8 @@
+{
+  "name": "stat-callout",
+  "description": "A big number or figure with a short label under it",
+  "frame": "center",
+  "fields": ["value", "label"],
+  "html": "<div class=\"tpl-stat\"><div class=\"tpl-stat-value\">{{value}}</div><div class=\"tpl-stat-label\">{{label}}</div></div>",
+  "css": ".tpl-stat{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;background:var(--brand-blue);border-radius:calc(var(--u)*18px);padding:calc(var(--u)*40px) calc(var(--u)*56px);box-shadow:0 calc(var(--u)*18px) calc(var(--u)*50px) rgba(0,0,0,.35)}.tpl-stat-value{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*112px);line-height:1;color:var(--brand-orange);letter-spacing:-.01em}.tpl-stat-label{margin-top:calc(var(--u)*12px);font-family:var(--brand-body);font-weight:600;font-size:calc(var(--u)*32px);color:var(--brand-text)}"
+}

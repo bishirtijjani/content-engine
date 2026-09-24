@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Production Engine — raw footage to finished platform assets",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./tools/lib/captions.mjs": "./tools/lib/captions.mjs"
+  },
+  "scripts": {
+    "catalog": "node tools/build-asset-catalog.mjs"
   },
   "dependencies": {
     "@content-os/core": "*",

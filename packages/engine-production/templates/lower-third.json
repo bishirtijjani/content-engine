@@ -1,0 +1,8 @@
+{
+  "name": "lower-third",
+  "description": "A name and role strip",
+  "frame": "left",
+  "fields": ["name", "role"],
+  "html": "<div class=\"tpl-lt\"><div class=\"tpl-lt-name\">{{name}}</div><div class=\"tpl-lt-role\">{{role}}</div></div>",
+  "css": ".tpl-lt{background:var(--brand-blue);border-left:calc(var(--u)*10px) solid var(--brand-orange);border-radius:calc(var(--u)*8px);padding:calc(var(--u)*22px) calc(var(--u)*32px);box-shadow:0 calc(var(--u)*12px) calc(var(--u)*40px) rgba(0,0,0,.4)}.tpl-lt-name{font-family:var(--brand-display);font-weight:800;font-size:calc(var(--u)*42px);color:var(--brand-text);line-height:1.1}.tpl-lt-role{font-family:var(--brand-body);font-weight:500;font-size:calc(var(--u)*26px);color:var(--brand-orange);margin-top:calc(var(--u)*4px)}"
+}

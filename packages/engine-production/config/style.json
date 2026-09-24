@@ -1,0 +1,170 @@
+{
+  "version": 3,
+  "note": "THE locked style for every video the production engine makes. How a video looks and sounds lives here and nowhere else. Per-video choices (which visual, which graphic, which words, which clip becomes a short) do NOT live here — they live in the agent-written plan.",
+
+  "doctrine": {
+    "rule": "Everything on screen must earn its place. If you cannot say why it is there in one plain sentence, it does not go on screen.",
+    "canvas": "Burnt orange backdrop. Everything sits on it; the orange shows around the edges.",
+    "onScreen": ["screenshot", "screen recording", "your own video", "graphic", "diagram"],
+    "noStockFootage": true,
+    "keepOut": "Visuals never enter the caption band.",
+    "screenRule": "If they need to look at it, it takes the screen (frame 'full' or 'center'). If it only supports what you are saying, it shares the screen (frame 'left' or 'right')."
+  },
+
+  "brand": {
+    "name": "Bishir Tijjani",
+    "lexicon": "brand/lexicon.json",
+    "assets": "brand/assets",
+    "tokens": ".opencode/skills/codeket-assets/references/tokens.css",
+    "account": "founder",
+    "accounts": {
+      "founder": { "handle": "@iambishir", "accent": "#0f4c81" }
+    },
+    "colors": {
+      "bg": "#EA580C",
+      "surface": "#F59E0B",
+      "text": "#FFFFFF",
+      "muted": "#FFFFFF",
+      "orange": "#EA580C",
+      "blue": "#0f4c81"
+    },
+    "fonts": {
+      "display": "Montserrat",
+      "body": "Plus Jakarta Sans",
+      "mono": "JetBrains Mono"
+    }
+  },
+
+  "captions": {
+    "engine": "faster-whisper",
+    "model": "base.en",
+    "language": "en",
+    "style": "codeket-locked",
+    "emphasis": ["AI automation", "AI engineer", "Bishir Tijjani"],
+    "maxEmphasisPerPhrase": 1,
+    "font": { "baseRatio": 0.052, "emphRatio": 1.8, "plainWeight": 600, "emphWeight": 900 },
+    "grouping": {
+      "maxWords": 5,
+      "maxChars": 30,
+      "pauseGap": 0.7,
+      "minDuration": 0.6,
+      "hold": 0.15
+    },
+    "band": { "top": 0.72, "keepOutAbove": 0.65 }
+  },
+
+  "cards": {
+    "zone": { "top": 0.08, "bottom": 0.65 },
+    "defaultStyle": "editorial",
+    "styles": {
+      "editorial": { "bg": "#0f4c81", "fg": "#FFFFFF", "accent": "#EA580C", "radius": 18 },
+      "accent": { "bg": "#EA580C", "fg": "#FFFFFF", "accent": "#0f4c81", "radius": 18 },
+      "quiet": { "bg": "rgba(11,18,32,0.82)", "fg": "#FFFFFF", "accent": "#EA580C", "radius": 14 }
+    }
+  },
+
+  "visuals": {
+    "zone": { "top": 0.08, "bottom": 0.65 },
+    "margin": 0.06,
+    "radius": 18,
+    "shadow": true
+  },
+
+  "backdrop": {
+    "file": "backdrop/brand.svg",
+    "note": "The designed backdrop, the base layer of every composition. A grid with depth. Edit the SVG to change the look; every future video follows. brand.colors.bg is the fallback if the file is missing."
+  },
+
+  "output": {
+    "crf": 18,
+    "preset": "veryfast",
+    "audioBitrate": "192k",
+    "note": "Used by both the cleaner's cut and the render, so the final size is predictable. crf 18 is visually lossless; preset veryfast is the speed choice for this machine. The picture is encoded at most twice: once by the cleaner, once by the render."
+  },
+
+  "clean": {
+    "note": "How the cleaner turns raw footage into one cleaned video. Silences are measured from the audio, never guessed from the transcript, so a missed word is never cut. The cleaner proposes the cut list and never applies it without human approval. gapMin: shortest silence to trim (s). gapKeep: silence kept after the previous word (s). minCut: shortest pause cut allowed (s). cutPadEnd: silence kept before the next word (s). edgeKeep: silence kept at the very start and end (s). pad: padding around a filler or retake cut (s). minKeep: a kept clip shorter than this is absorbed into a cut (s). utteranceGap: silence that ends a sentence (s). fillers: words removed on sight. retake: a repeated take is the earlier one; maxGap = how close in time two takes must be (s), similarity = token-overlap ratio that marks a repeat, maxWords = words compared per take, shortStart = a false start this short that the next take repeats.",
+    "gapMin": 0.9,
+    "gapKeep": 0.3,
+    "minCut": 0.3,
+    "cutPadEnd": 0.02,
+    "edgeKeep": 0.3,
+    "pad": 0.05,
+    "minKeep": 0.4,
+    "utteranceGap": 0.35,
+    "fillers": ["um", "uh", "erm", "er", "uhm", "hmm", "mm", "ah", "eh", "huh"],
+    "retake": { "maxGap": 2.0, "similarity": 0.7, "maxWords": 8, "shortStart": 4 }
+  },
+
+  "frames": {
+    "full":   { "mode": "takeover", "x": 0.06, "y": 0.08, "w": 0.88, "h": 0.57, "fit": "contain", "what": "screenshots, screen recordings, diagrams, charts" },
+    "center": { "mode": "takeover", "x": 0.18, "y": 0.14, "w": 0.64, "h": 0.45, "fit": "contain", "what": "big stat, quote, CTA, title, prompt" },
+    "left":   { "mode": "split",    "x": 0.06, "y": 0.10, "w": 0.42, "h": 0.50, "fit": "contain", "what": "a supporting visual or note; face on the right", "face": { "x": 0.52, "y": 0.0, "w": 0.48, "h": 1.0 } },
+    "right":  { "mode": "split",    "x": 0.52, "y": 0.10, "w": 0.42, "h": 0.50, "fit": "contain", "what": "a supporting visual or button; face on the left",  "face": { "x": 0.0,  "y": 0.0, "w": 0.48, "h": 1.0 } }
+  },
+
+  "motion": {
+    "ease": "power2.out",
+    "zoom": { "min": 1.0, "max": 1.25, "default": 1.12, "duration": 0.8 },
+    "cardIn": 0.4,
+    "cardOut": 0.3,
+    "maxZoomsPerMinute": 4
+  },
+
+  "sfx": {
+    "defaultLevel": 0.5,
+    "cues": {
+      "whoosh": "whoosh-soft",
+      "click": "click-ui",
+      "pop": "pop-soft",
+      "ding": "ding-notify",
+      "riser": "riser-build",
+      "impact": "impact-thud"
+    }
+  },
+
+  "grade": {
+    "contrast": 1.05,
+    "saturation": 1.02,
+    "brightness": 1.0
+  },
+
+  "funnel": {
+    "shorts": 3,
+    "long": { "aspect": "16:9", "resolution": "landscape" },
+    "short": { "aspect": "9:16", "resolution": "portrait" }
+  },
+
+  "paths": {
+    "assets": "assets",
+    "templates": "templates",
+    "input": "data",
+    "compositions": "data/compositions",
+    "renders": "data/renders"
+  },
+
+  "routing": {
+    "footage": "embedded-captions",
+    "audio": "music-to-video",
+    "script": "faceless-explainer",
+    "url": "product-launch-video",
+    "pr": "pr-to-video",
+    "longform": "general-video"
+  },
+
+  "voice": {
+    "rule": "Talk to the human in plain, short sentences. No technical words. No status reports full of terms. Say what happened and what you need, in as few words as possible.",
+    "never": [
+      "composition assembled, beat map validated",
+      "rendering queued",
+      "asset_review gate requested",
+      "the plan failed validation on 2 constraints"
+    ],
+    "instead": [
+      "Made it. Want to watch?",
+      "Ready. Should I do the shorts?",
+      "One thing is off — the second card runs too long. Fix it?",
+      "Done. Two shorts cut. Want to see them?"
+    ]
+  }
+}
