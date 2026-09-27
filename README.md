@@ -248,6 +248,8 @@ npm run clean -- data/vid1 --apply    # cut, after the human approves
 ```
 
 - It adds no captions and no overlays — it only syncs and cuts. Production does the rest.
+- **Repeated takes** keep the last try and remove the first try plus everything said up to it; self-talk ("start again", "I'm supposed to", counting "three two one") goes on its own. No script is needed, so improvised lines are kept.
+- **Tags** — a watermark a service baked in (Auphonic's free "free audio post production by auphonic.com") is removed at the very start or end.
 - **Pauses come from measured audio silence, never from transcript gaps**, so a word the speech model missed can never be cut.
 - **It never writes to its inputs** — the video and the audio are read-only, and it refuses any output equal to an input.
 - Always show the cut list and get the human's yes before `--apply`.

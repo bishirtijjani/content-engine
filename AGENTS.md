@@ -86,7 +86,7 @@ before writing — hooks, structure beats, voice, platform fit, checklist.
 
 The cleaner turns one raw recording into one clean video, before production. The
 human puts one video and the separate audio recording in `data/<name>/`; the
-cleaner syncs them, then cuts the pauses and the wrong takes.
+cleaner syncs them, then cuts the pauses, the self-talk, and the repeated takes.
 
 ```bash
 npm run clean -- data/vid1            # propose: print the cut list, cut nothing
@@ -95,6 +95,15 @@ npm run clean -- data/vid1 --apply    # cut, after the human approves
 
 - The cleaner adds no captions and no overlays — it only syncs and cuts.
   Production does the rest.
+- **Repeated takes:** when a line is said more than once, the **last** try is
+  kept; the first try and everything said up to it (including any aside in
+  between) is removed. Self-talk ("start again", "I'm supposed to", counting
+  "three two one") is removed on its own. This is what makes a line-by-line
+  read with restarts usable. No script is needed — decisions come from the
+  transcript alone, so improvised lines are always kept.
+- **Tags:** a watermark a service baked into the audio (Auphonic's free tag,
+  "free audio post production by auphonic.com") is removed when it sits at the
+  very start or end. The phrases live in `config/style.json` under `clean.tags`.
 - Pauses come from measured audio silence, never from transcript gaps, so a word
   the speech model missed can never be cut.
 - It never writes to the video or the audio; it refuses any output path equal to

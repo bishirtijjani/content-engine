@@ -83,17 +83,35 @@
   },
 
   "clean": {
-    "note": "How the cleaner turns raw footage into one cleaned video. Silences are measured from the audio, never guessed from the transcript, so a missed word is never cut. The cleaner proposes the cut list and never applies it without human approval. gapMin: shortest silence to trim (s). gapKeep: silence kept after the previous word (s). minCut: shortest pause cut allowed (s). cutPadEnd: silence kept before the next word (s). edgeKeep: silence kept at the very start and end (s). pad: padding around a filler or retake cut (s). minKeep: a kept clip shorter than this is absorbed into a cut (s). utteranceGap: silence that ends a sentence (s). fillers: words removed on sight. retake: a repeated take is the earlier one; maxGap = how close in time two takes must be (s), similarity = token-overlap ratio that marks a repeat, maxWords = words compared per take, shortStart = a false start this short that the next take repeats.",
-    "gapMin": 0.9,
-    "gapKeep": 0.3,
-    "minCut": 0.3,
+    "note": "How the cleaner turns raw footage into one cleaned video. Silences are measured from the audio, never guessed from the transcript, so a word the model missed is never cut. The cleaner shows the cut list and never cuts without a human yes. gapMin = shortest silence worth trimming (s). gapKeep = silence left after the previous word (s). minCut = shortest pause cut allowed (s). cutPadEnd = silence left before the next word (s). edgeKeep = silence left at the very start and end (s). pad = room left around a filler, self-talk or false-start cut (s). minKeep = a kept clip shorter than this is absorbed into a cut (s). utteranceGap = silence that ends a spoken line (s). fillers = words removed on sight. selfTalk = asides said to himself, matched on the words themselves, so a countdown stuck to the start of a line is removed on its own. selfTalkExact = single words removed only when the whole line is that one word. tags = phrases of a watermark baked into the audio (e.g. Auphonic's free tag), removed only at the very start or end; tag = gap that still counts as one tag and how close to the start/end it must be. retake = false starts: maxGap = how close (s) a short line and the line that repeats it must be, similarity = word overlap that marks two lines as the same, maxWords = words compared per line, shortStart = a line this short that the next repeats from the top. repeat = a line said more than once: keep the last try and remove the first try plus everything said up to the last try; window = how far apart (s) the tries can be, maxAhead = how many spoken lines ahead to look, minWords = lines shorter than this are never treated as repeats, minPrefix = same opening words that mark two lines as the same, shortLine = a line this short repeated from the top is the same line, orphanGap = a short fragment this close (s) before a try joins its cut. inline = a phrase said twice in one breath: maxWords = longest repeated phrase to look for, minWords = shortest (1 catches 'the the'), gapWords = words allowed between the copies.",
+    "gapMin": 0.3,
+    "gapKeep": 0.08,
+    "minCut": 0.05,
     "cutPadEnd": 0.02,
     "edgeKeep": 0.3,
     "pad": 0.05,
     "minKeep": 0.4,
     "utteranceGap": 0.35,
     "fillers": ["um", "uh", "erm", "er", "uhm", "hmm", "mm", "ah", "eh", "huh"],
-    "retake": { "maxGap": 2.0, "similarity": 0.7, "maxWords": 8, "shortStart": 4 }
+    "selfTalk": [
+      "start again", "start over", "from the top", "start from the top",
+      "one more time", "one more take", "take two", "take three", "take four",
+      "let me start again", "i'm supposed to", "i am supposed to", "im supposed to",
+      "where was i", "hold on", "hang on", "give me a second", "just a second",
+      "my bad", "oops", "wait wait", "three two one", "two one", "one two three"
+    ],
+    "selfTalkExact": ["wait", "okay", "ok", "pause"],
+    "tags": [
+      "free audio post production", "audio post production", "post production by",
+      "by auphonic", "by alphonic", "by auponic",
+      "auphonic com", "alphonic com", "auponic com",
+      "auphonic", "alphonic", "auponic"
+    ],
+    "tag": { "gap": 1.5, "headWindow": 25, "tailWindow": 25 },
+    "retake": { "maxGap": 2.0, "similarity": 0.7, "maxWords": 8, "shortStart": 4 },
+    "repeat": { "window": 180, "maxAhead": 40, "minWords": 3, "minPrefix": 4, "shortLine": 4, "betweenMax": 999, "orphanGap": 12 },
+    "inline": { "maxWords": 8, "minWords": 1, "gapWords": 3 },
+    "maxWordDur": 1.5
   },
 
   "frames": {

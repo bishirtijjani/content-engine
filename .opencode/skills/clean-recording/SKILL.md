@@ -49,7 +49,26 @@ decision, exactly like the engine's gates.
    (`silence.py`). Pauses never come from the transcript, so a word the speech
    model missed can never be cut.
 4. **words** — a word-timed transcript of the aligned audio (`transcribe.py`).
-5. **cuts** — pauses, filler words, and repeated takes (`lib/cut.mjs`).
+5. **cuts** — pauses, filler words, self-talk, and repeated takes (`lib/cut.mjs`).
+
+## What it cuts
+
+- **pauses** — silence measured from the audio, trimmed to a short breath.
+- **fillers** — "um", "uh", and similar.
+- **self-talk** — asides said to himself: "start again", "I'm supposed to",
+  counting "three two one". Matched on the words themselves, so a countdown
+  stuck to the start of a line is removed on its own.
+- **repeated takes** — a line said more than once. The **last** try is kept;
+  the first try and everything said up to it (including any aside in between)
+  is removed. This is the main fix for reading a script line by line and
+  restarting.
+- **false starts** — a short fragment the next line repeats from the top.
+- **tags** — a watermark a service baked into the audio (e.g. Auphonic's free
+  "free audio post production by auphonic.com"). Removed only at the very start
+  or end, never mid-video.
+
+A short fragment right before a repeated line is treated as the same broken
+sentence and removed with it.
 
 Each step is cached next to the video (`<name>.align.json`, `.aligned.wav`,
 `.silences.json`, `.transcript.json`, `.cuts.json`). Re-running reuses the cache;
@@ -75,7 +94,15 @@ listening again.
 - `gapKeep` — silence left after the previous word.
 - `minCut` — shortest pause cut allowed.
 - `fillers` — words removed on sight.
-- `retake` — how repeated takes are compared.
+- `selfTalk` — asides removed on sight (whole-word phrases).
+- `selfTalkExact` — single words removed only when the whole line is that word.
+- `tags` — a baked-in watermark's phrases; `tag` — how close to the start or end
+  it must be, and the gap that still counts as one tag.
+- `retake` — how two takes are judged the same line (similarity, words compared,
+  false-start length).
+- `repeat` — how far apart two tries can be, how many lines ahead to look, the
+  shortest line treated as a repeat, and how close a fragment must be to join a
+  repeat cut.
 
 Change a number, re-run. Alignment, audio, silence and words stay cached; only
 the cut re-encodes (the slow part, ~minutes for a long video).

@@ -6,7 +6,8 @@
 //   1. align    sample-accurate offset + drift between the two (align.py)
 //   2. place    build the aligned recording on the video's timeline (place.py)
 //   3. guess    a word-timed transcript of the aligned audio (transcribe.py)
-//   4. cuts     pauses, fillers, retakes -> a cut list  (shown, never auto-applied)
+//   4. cuts     pauses, fillers, self-talk, repeated takes -> a cut list
+//               (shown, never auto-applied)
 //   5. apply    --apply cuts the picture and audio in one pass
 //
 // The engine never cuts. This tool proposes; the human approves.
@@ -18,13 +19,14 @@
 
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, readFileSync, statSync, writeFileSync, readdirSync,
+  existsSync, readFileSync, statSync, writeFileSync, readdirSync, mkdirSync, rmSync,
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadStyle } from '../../src/style.mjs';
 import { buildCuts } from './lib/cut.mjs';
+import { repairWordsWithScript } from './lib/script.mjs';
 import { assertNotInput } from './lib/guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -128,11 +130,12 @@ function printTable(cuts) {
     console.log('  (no cuts proposed — the take is already clean)');
     return;
   }
-  console.log('   #  reason      start      end        len     detail');
+  const w = Math.max(12, ...cuts.map((c) => c.reason.length));
+  console.log(`   #  ${'reason'.padEnd(w)}  start      end        len     detail`);
   cuts.forEach((c, i) => {
     const detail = c.detail ? c.detail.slice(0, 46) : '';
     console.log(
-      `  ${String(i + 1).padStart(2)}  ${c.reason.padEnd(10)}  ${fmt(c.start).padStart(8)}  ` +
+      `  ${String(i + 1).padStart(2)}  ${c.reason.padEnd(w)}  ${fmt(c.start).padStart(8)}  ` +
       `${fmt(c.end).padStart(8)}  ${(c.end - c.start).toFixed(2).padStart(5)}s  ${detail}`,
     );
   });
@@ -157,33 +160,41 @@ function remapTranscript(words, keeps) {
   return out;
 }
 
-function cutArgs({ video, audio, keeps, crf, fpsRational, audioBitrate, out }) {
-  const parts = [];
-  const vs = [];
-  const as = [];
+/**
+ * Cut by encoding each keep on its own (input seek, no filter graph) then
+ * joining the pieces with the concat demuxer. On a small CPU a single
+ * filter-graph cut runs many times slower than plain encodes.
+ */
+function cutVideo({ video, audio, keeps, crf, fpsRational, audioBitrate, out, folder }) {
+  const segDir = path.join(folder, '_segments');
+  if (existsSync(segDir)) rmSync(segDir, { recursive: true, force: true });
+  mkdirSync(segDir, { recursive: true });
+  const list = [];
   keeps.forEach((k, i) => {
-    parts.push(`[0:v]trim=start=${k.start.toFixed(6)}:end=${k.end.toFixed(6)},setpts=PTS-STARTPTS[v${i}]`);
-    parts.push(`[1:a]atrim=start=${k.start.toFixed(6)}:end=${k.end.toFixed(6)},asetpts=PTS-STARTPTS[a${i}]`);
-    vs.push(`[v${i}]`);
-    as.push(`[a${i}]`);
+    const dur = k.end - k.start;
+    const f = path.join(segDir, `seg${String(i).padStart(4, '0')}.mp4`);
+    const args = [
+      '-y', '-v', 'error',
+      '-ss', k.start.toFixed(6), '-t', dur.toFixed(6), '-i', video,
+      '-ss', k.start.toFixed(6), '-t', dur.toFixed(6), '-i', audio,
+      '-map', '0:v:0', '-map', '1:a:0',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', audioBitrate,
+    ];
+    if (fpsRational) args.push('-r', fpsRational);
+    args.push(f);
+    if (i % 10 === 0) process.stdout.write(`  encode ${i + 1}/${keeps.length}\n`);
+    const res = spawnSync('ffmpeg', args, { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+    if (res.status !== 0) die(`ffmpeg segment ${i + 1}/${keeps.length} failed:\n${(res.stderr || '').slice(-600)}`);
+    list.push(`file '${f.replace(/\\/g, '/')}'`);
   });
-  if (keeps.length > 1) {
-    parts.push(`${vs.join('')}concat=n=${keeps.length}:v=1:a=0[vout]`);
-    parts.push(`${as.join('')}concat=n=${keeps.length}:v=0:a=1[aout]`);
-  } else {
-    parts.push('[v0]null[vout]');
-    parts.push('[a0]null[aout]');
-  }
-  const args = [
-    '-y', '-i', video, '-i', audio,
-    '-filter_complex', parts.join(';'),
-    '-map', '[vout]', '-map', '[aout]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-b:a', audioBitrate, '-movflags', '+faststart',
-  ];
-  if (fpsRational) args.push('-r', fpsRational);
-  args.push(out);
-  return args;
+  const listPath = path.join(segDir, 'list.txt');
+  writeFileSync(listPath, list.join('\n'), 'utf8');
+  const res = spawnSync('ffmpeg', [
+    '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', out,
+  ], { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
+  if (res.status !== 0) die(`ffmpeg concat failed:\n${(res.stderr || '').slice(-600)}`);
+  rmSync(segDir, { recursive: true, force: true });
 }
 
 function main() {
@@ -233,11 +244,18 @@ function main() {
     console.log('  place  cached (aligned.wav)');
   }
 
-  // 2b. measure silence from the audio (pauses never come from transcript gaps)
+  // 2b. measure silence from the audio (pauses never come from transcript gaps).
+  //     Measured to a small fixed floor so the recording is analysed once; which
+  //     silences get cut is decided later by cleanCfg.gapMin, no re-measure.
+  const SIL_FLOOR = 0.12;
   const silPath = path.join(folder, `${base}.silences.json`);
-  if (realign || stale(silPath, alignPath)) {
+  const silFloorPath = path.join(folder, `${base}.silences.floor`);
+  const floorOk = existsSync(silFloorPath)
+    && readFileSync(silFloorPath, 'utf8').trim() === String(SIL_FLOOR);
+  if (realign || stale(silPath, alignPath) || !floorOk) {
     guardOutput(silPath, INPUTS);
-    runPython(path.join(HERE, 'silence.py'), ['--audio', wav, '--min', String(cleanCfg.gapMin ?? 0.6), '--out', silPath], 'measuring silence');
+    runPython(path.join(HERE, 'silence.py'), ['--audio', wav, '--min', String(SIL_FLOOR), '--out', silPath], 'measuring silence');
+    writeFileSync(silFloorPath, String(SIL_FLOOR), 'utf8');
   } else {
     console.log('  quiet  cached (silences.json)');
   }
@@ -253,13 +271,26 @@ function main() {
   }
   const words = JSON.parse(readFileSync(tPath, 'utf8'));
 
+  // the script is the spine: which words belong to which line, last take wins
+  const scriptPath = path.join(folder, 'script.txt');
+  const script = existsSync(scriptPath)
+    ? readFileSync(scriptPath, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    : null;
+  if (script) console.log(`  script ${script.length} line(s) (${path.basename(scriptPath)})`);
+
   // 4. build the cut list
   const result = buildCuts({
     words,
     span: { start: align.overlap_start, end: align.overlap_end },
     silences,
+    script,
     config: { ...cleanCfg, frameFps: video.probe.fps },
   });
+  if (result.qa) {
+    const q = result.qa;
+    const miss = q.missing.length ? `  MISSING lines ${q.missing.map((n) => n + 1).join(',')}` : '';
+    console.log(`  check  ${q.kept}/${q.lines} line(s) kept${miss}  (lines with retries: ${q.retried.length})`);
+  }
   const cutsPath = path.join(folder, `${base}.cuts.json`);
   guardOutput(cutsPath, INPUTS);
   writeFileSync(
@@ -285,14 +316,12 @@ function main() {
   const crf = outCfg.crf ?? 18;
   const audioBitrate = outCfg.audioBitrate ?? '192k';
   console.log(`\n  cutting ${result.keeps.length} keep(s) -> ${path.basename(cleaned)} (crf ${crf})...\n`);
-  const args = cutArgs({
+  cutVideo({
     video: video.file, audio: wav, keeps: result.keeps,
-    crf, fpsRational: video.probe.fpsRational, audioBitrate, out: cleaned,
+    crf, fpsRational: video.probe.fpsRational, audioBitrate, out: cleaned, folder,
   });
-  const res = spawnSync('ffmpeg', args, { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] });
-  if (res.status !== 0) die(`ffmpeg cut failed:\n${(res.stderr || '').slice(-600)}`);
 
-  writeFileSync(path.join(folder, `${base}.cleaned.transcript.json`), JSON.stringify(remapTranscript(words, result.keeps), null, 2), 'utf8');
+  writeFileSync(path.join(folder, `${base}.cleaned.transcript.json`), JSON.stringify(repairWordsWithScript(remapTranscript(words, result.keeps), script), null, 2), 'utf8');
 
   const cProbe = probe(cleaned);
   const mb = (statSync(cleaned).size / 1e6).toFixed(0);
