@@ -41,6 +41,10 @@ addIdeas() → evaluate() → [human: idea_approval] → plan()
 → [human: script_review] → ready() → ready_to_shoot
 ```
 
+`ready()` also creates `data/vid<id>/` and writes `script.txt` there (the spoken
+lines, one per line). The human records by reading it, then the clean and
+production steps both work from that folder.
+
 Rejected at script review? Agent edits the script, then
 `engine.resubmit({ targetId })` requests a fresh review.
 
@@ -85,22 +89,36 @@ before writing — hooks, structure beats, voice, platform fit, checklist.
 ## Cleaning (raw → one clean video)
 
 The cleaner turns one raw recording into one clean video, before production. The
-human puts one video and the separate audio recording in `data/<name>/`; the
-cleaner syncs them, then cuts the pauses, the self-talk, and the repeated takes.
+human puts one video, the separate audio recording, and `script.txt` in
+`data/<name>/`. The script is the spine: the cleaner aligns the spoken words to
+the script lines, keeps the **last take of each line**, and cuts everything else.
+
+When the item came from the content engine, `ready()` already created the folder
+as `data/vid<id>/` and wrote `script.txt` there from the approved script — the
+human records by reading it and drops the video + audio into the same folder.
 
 ```bash
-npm run clean -- data/vid1            # propose: print the cut list, cut nothing
+npm run clean -- data/vid1            # propose: cut list + read + review file
 npm run clean -- data/vid1 --apply    # cut, after the human approves
 ```
 
-- The cleaner adds no captions and no overlays — it only syncs and cuts.
-  Production does the rest.
-- **Repeated takes:** when a line is said more than once, the **last** try is
-  kept; the first try and everything said up to it (including any aside in
-  between) is removed. Self-talk ("start again", "I'm supposed to", counting
-  "three two one") is removed on its own. This is what makes a line-by-line
-  read with restarts usable. No script is needed — decisions come from the
-  transcript alone, so improvised lines are always kept.
+- The engine works; the agent decides. The engine cannot judge meaning, so it
+  hands every judgement to the agent in **one file**,
+  `data/<name>/<name>.review.json`:
+  - `lines` — each script line, found or not, the words `heard`, `decision`
+    `keep`/`skip`, and `start`/`end` to trim the window.
+  - `words` — heard vs the script word, `decision` `fix`/`leave` (default
+    `leave`; the engine never edits text on its own).
+  - `asides` — stretches between takes, `decision` `keep` (relevant) / `drop`.
+  - `cuts` — hand cuts the agent adds (`{ start, end, why }`) for a repeated
+    take or a stumble the engine missed.
+  Decisions and windows are preserved across re-runs.
+- **The agent reads `<name>.read.txt`** — the whole edit, one paragraph per kept
+  line — and clears every warning the run prints (`SILENCE` left inside a take,
+  `REPEAT` of a phrase in one line) before `--apply`.
+- **Repeated takes:** the last try is kept; the first try and everything said up
+  to it is removed. Improvised asides between takes are dropped unless the agent
+  marks them `keep`.
 - **Tags:** a watermark a service baked into the audio (Auphonic's free tag,
   "free audio post production by auphonic.com") is removed when it sits at the
   very start or end. The phrases live in `config/style.json` under `clean.tags`.
@@ -108,7 +126,7 @@ npm run clean -- data/vid1 --apply    # cut, after the human approves
   the speech model missed can never be cut.
 - It never writes to the video or the audio; it refuses any output path equal to
   an input.
-- Always show the cut list and wait for the human's yes before `--apply`.
+- **Never `--apply` without the human reading `<name>.read.txt` and saying yes.**
 - Thresholds live in `config/style.json` under `clean`. Steps are cached next to
   the video; only the cut re-encodes.
 - Full procedure: the `clean-recording` skill.

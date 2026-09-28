@@ -237,5 +237,49 @@ test('never cuts a silence span that overlaps a word', () => {
     words, span: { start: 0, end: 3 },
     silences: [{ start: 0.5, end: 2.5 }],
   });
-  assert.equal(cuts.filter((c) => c.reason.includes('pause')).length, 0);
+  const pauses = cuts.filter((c) => c.reason.includes('pause'));
+  assert.ok(pauses.length >= 1, 'the word-free part of the silence is still cut');
+  for (const c of pauses) {
+    assert.ok(c.end <= 1.2 || c.start >= 1.6, `pause cut ${c.start}-${c.end} must not touch the word`);
+  }
+});
+
+test('script-led clean keeps the last take of each line', () => {
+  const words = [
+    w('we', 0, 0.3), w('automate', 0.4, 0.8), w('the', 0.9, 1.0), w('boring', 1.1, 1.4), w('work', 1.5, 1.7),
+    w('we', 3, 3.2), w('automate', 3.3, 3.6), w('the', 3.7, 3.8), w('boring', 3.9, 4.2), w('work', 4.3, 4.5),
+    w('it', 6, 6.2), w('saves', 6.3, 6.6), w('you', 6.8, 7.0), w('time', 7.1, 7.4),
+  ];
+  const script = ['we automate the boring work', 'it saves you time'];
+  const { keeps, qa } = buildCuts({ words, span: { start: 0, end: 7.4 }, script });
+  assert.equal(qa.missing.length, 0);
+  const first = keeps.find((k) => k.start >= 2.5 && k.start <= 3.5);
+  assert.ok(first, 'the later take of the first line is the one kept');
+  assert.ok(first.start > 2.5, 'the earlier take is not kept');
+});
+
+test('an agent cut removes a range the engine kept', () => {
+  const words = [
+    w('we', 0, 0.3), w('automate', 0.4, 0.8), w('the', 0.9, 1.0), w('boring', 1.1, 1.4), w('work', 1.5, 1.7),
+  ];
+  const script = ['we automate the boring work'];
+  const { cuts } = buildCuts({
+    words, span: { start: 0, end: 1.7 }, script,
+    config: { review: { cuts: [{ start: 0.8, end: 1.2, why: 'test' }] } },
+  });
+  assert.ok(cuts.some((c) => c.reason.includes('agent')), 'the agent cut is present');
+  assert.ok(cuts.some((c) => Math.abs(c.start - 0.8) < 0.01 && Math.abs(c.end - 1.2) < 0.01));
+});
+
+test('a line marked skip is dropped', () => {
+  const words = [
+    w('we', 0, 0.3), w('automate', 0.4, 0.8), w('the', 0.9, 1.0), w('boring', 1.1, 1.4), w('work', 1.5, 1.7),
+    w('it', 3, 3.2), w('saves', 3.3, 3.6), w('you', 3.8, 4.0), w('time', 4.1, 4.4),
+  ];
+  const script = ['we automate the boring work', 'it saves you time'];
+  const { keeps } = buildCuts({
+    words, span: { start: 0, end: 4.4 }, script,
+    config: { review: { lines: [{ line: 1, decision: 'skip' }] } },
+  });
+  assert.ok(!keeps.some((k) => k.start > 2.5), 'the skipped second line is not kept');
 });

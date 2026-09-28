@@ -486,7 +486,13 @@ function pauseSpans(list, silences, cfg) {
       if (w.start <= cs && w.end >= ce) { bad = true; break; }
       if (w.start <= cs) cs = w.end + cfg.cutPadEnd;
       else if (w.end >= ce) ce = w.start - cfg.cutPadEnd;
-      else { bad = true; break; }
+      else {
+        // a word sits inside the silence (model timing bled into it): cut the
+        // larger of the two sides instead of abandoning the whole pause
+        if (w.start - cs >= ce - w.end) ce = w.start - cfg.cutPadEnd;
+        else cs = w.end + cfg.cutPadEnd;
+        break;
+      }
     }
     if (bad || ce - cs < cfg.minCut) continue;
     out.push({ start: cs, end: ce, reason: 'pause', detail: `${len.toFixed(1)}s` });
@@ -538,36 +544,92 @@ function finalizeCuts(semantic, start, end, cfg) {
 }
 
 /**
- * Script-led cut: keep the last take of every line. Everything between takes
- * (earlier tries, detours, non-speech) is cut as "off-script"; inside a kept
- * take, only pauses, fillers and self-talk are trimmed.
+ * Script-led cut: keep the last take of every line. What is said between takes
+ * (earlier tries, self-talk, detours) is an "aside" — a candidate the agent
+ * judges. An aside is cut unless it is marked "keep" (relevant to the topic);
+ * earlier tries and self-talk are cut by default. Inside a kept take, only
+ * pauses, fillers and self-talk are trimmed.
+ *
+ * `cfg.review` is the agent's one answers file: { lines, asides, words }.
+ * A line marked "skip" is dropped; a line marked "keep" is kept (for a line the
+ * engine could not find, its `candidate` window is used).
  */
 function buildScriptCuts({ list, start, end, silences, cfg, script }) {
-  const { keeps: rawKeeps, missing, retried } = lineKeepSpans(list, script, cfg);
+  const { keeps: rawKeeps, missing, retried, lines } = lineKeepSpans(list, script, cfg);
+  const review = cfg.review ?? null;
 
-  // merge takes that run into each other
+  const asideDecision = new Map();
+  if (review?.asides) for (const A of review.asides) asideDecision.set(Math.round(A.start * 10), A);
+
+  // The agent's line decisions are the source of truth: each line carries the
+  // window the agent approved (it may have trimmed the engine's first guess).
+  // Fall back to the engine's own keeps only on the first run, before a review
+  // file exists.
+  const covered = [];
+  if (review?.lines?.length) {
+    for (const L of review.lines) {
+      if (L.decision !== 'keep') continue;
+      const w = L.keep
+        ?? (Number.isFinite(L.start) && Number.isFinite(L.end) ? { start: L.start, end: L.end } : null)
+        ?? L.candidate;
+      if (w && Number.isFinite(w.start) && Number.isFinite(w.end)) covered.push({ start: w.start, end: w.end });
+    }
+  } else {
+    for (const k of rawKeeps) covered.push({ start: k.start, end: k.end });
+  }
+
+  // merge takes that run into each other, but never let one line run into the next
+  covered.sort((a, b) => a.start - b.start);
+  for (let k = 0; k < covered.length - 1; k += 1) {
+    if (covered[k].end > covered[k + 1].start) covered[k].end = covered[k + 1].start;
+  }
   const merged = [];
-  for (const k of [...rawKeeps].sort((a, b) => a.start - b.start)) {
+  for (const k of [...covered].sort((a, b) => a.start - b.start)) {
     const last = merged[merged.length - 1];
     if (last && k.start - last.end <= cfg.utteranceGap) last.end = Math.max(last.end, k.end);
     else merged.push({ start: k.start, end: k.end });
   }
 
   const semantic = [];
-  // everything outside a kept take
+
+  // measured pauses are trimmed everywhere
+  if (silences) {
+    for (const p of pauseSpans(list, silences, cfg)) semantic.push(p);
+  }
+
+  // cuts the agent asked for by hand (a repeated take, a stumble)
+  for (const c of review?.cuts ?? []) {
+    if (Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start) {
+      semantic.push({ start: c.start, end: c.end, reason: 'agent', detail: c.why ?? null });
+    }
+  }
+
+  // a watermark baked into the audio, at the head or tail
+  for (const t of tagRanges(list, cfg, { start, end })) {
+    semantic.push({ ...t, reason: 'tag' });
+  }
+
+  // the stretches between takes: each one is an aside to judge
+  const asides = [];
+  const between = [];
   let cur = start;
   for (const k of merged) {
     const ce = Math.max(cur, k.start - cfg.pad);
-    if (ce - cur > 0.03) semantic.push({ start: cur, end: ce, reason: 'off-script' });
+    if (ce - cur > 0.03) between.push({ start: cur, end: ce });
     cur = Math.max(cur, k.end + cfg.pad);
   }
-  if (end - cur > 0.03) semantic.push({ start: cur, end, reason: 'off-script' });
+  if (end - cur > 0.03) between.push({ start: cur, end });
 
-  // inside the kept takes: trim pauses
-  const inside = (a, b) => merged.some((k) => a >= k.start - 0.001 && b <= k.end + 0.001);
-  if (silences) {
-    for (const p of pauseSpans(list, silences, cfg)) {
-      if (inside(p.start, p.end)) semantic.push(p);
+  const insideKeep = (a, b) => merged.some((k) => a >= k.start - 0.001 && b <= k.end + 0.001);
+  for (const r of between) {
+    const text = list
+      .filter((w) => w.start >= r.start - 0.001 && w.end <= r.end + 0.001)
+      .map((w) => w.text).join(' ').trim();
+    const prior = asideDecision.get(Math.round(r.start * 10));
+    const decision = prior?.decision === 'keep' ? 'keep' : 'drop';
+    asides.push({ start: r.start, end: r.end, text, decision });
+    if (decision !== 'keep') {
+      semantic.push({ start: r.start, end: r.end, reason: 'off-script', detail: clip(text) });
     }
   }
 
@@ -580,14 +642,66 @@ function buildScriptCuts({ list, start, end, silences, cfg, script }) {
     }
   }
   for (const st of selfTalkRanges(list, cfg)) {
-    if (inside(st.start, st.end)) semantic.push({ ...st, reason: 'self-talk' });
+    if (insideKeep(st.start, st.end)) semantic.push({ ...st, reason: 'self-talk' });
   }
 
   const result = finalizeCuts(semantic, start, end, cfg);
+  const kept = asides.filter((a) => a.decision === 'keep');
+  result.asides = asides;
+  result.lines = lines;
+  const effLines = (review?.lines?.length ? review.lines : lines).map((L) => ({
+    line: L.line,
+    status: L.status,
+    decision: L.decision,
+    start: L.start ?? L.candidate?.start,
+    end: L.end ?? L.candidate?.end,
+  }));
+  result.warnings = qaWarnings({ list, silences, lines: effLines, keeps: result.keeps, agentCuts: review?.cuts ?? [] });
   result.qa = {
-    lines: script.length, kept: merged.length, missing, retried,
+    lines: script.length, kept: merged.length, missing, retried, asides: asides.length, keptAsides: kept.length,
+    warnings: result.warnings.length,
   };
   return result;
+}
+
+/**
+ * Problems the eye catches on a render, flagged up front so the agent can settle
+ * them before anything is cut. Pure: words, silences, kept lines in, warnings out.
+ *   silence — a long pause that survived inside a kept take (the cutter baulked)
+ *   repeat  — the same phrase said twice inside one kept line (two takes slipped in)
+ */
+function qaWarnings({ list, silences, lines, keeps, agentCuts }) {
+  const warnings = [];
+  const insideKeep = (a, b) => keeps.some((k) => a >= k.start - 0.06 && b <= k.end + 0.06);
+  const cutOut = (w) => (agentCuts ?? []).some((c) => w.start < c.end - 1e-6 && w.end > c.start + 1e-6);
+
+  for (const s of silences ?? []) {
+    const len = s.end - s.start;
+    if (len >= 1.5 && insideKeep(s.start, s.end)) {
+      warnings.push({ kind: 'silence', start: r3(s.start), end: r3(s.end), seconds: r3(len) });
+    }
+  }
+
+  for (const L of lines) {
+    if (L.status !== 'found' || !Number.isFinite(L.start)) continue;
+    if (L.decision && L.decision !== 'keep') continue;
+    const toks = list
+      .filter((w) => w.start >= L.start - 0.01 && w.end <= L.end + 0.01 && !cutOut(w))
+      .map((w) => normalizeToken(w.text)).filter(Boolean);
+    let hit = null;
+    for (let n = 6; n >= 4 && !hit; n -= 1) {
+      for (let i = 0; i + n <= toks.length && !hit; i += 1) {
+        for (let j = i + n; j + n <= toks.length; j += 1) {
+          if (toks.slice(i, i + n).join(' ') === toks.slice(j, j + n).join(' ')) {
+            hit = toks.slice(i, i + n).join(' ');
+            break;
+          }
+        }
+      }
+    }
+    if (hit) warnings.push({ kind: 'repeat', line: L.line, start: r3(L.start), end: r3(L.end), phrase: hit });
+  }
+  return warnings;
 }
 
 function clip(text, n = 48) {

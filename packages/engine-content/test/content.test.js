@@ -1,11 +1,14 @@
 // Content Engine — the full pipeline and all actions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initDb } from '@content-os/core';
 import { ContentEngine } from '../src/index.js';
+
+// Keep ready()'s shoot-folder writes out of the real repo data/.
+process.env.CONTENT_OS_DATA_DIR = mkdtempSync(path.join(tmpdir(), 'content-data-'));
 
 function freshDb() {
   const dir = mkdtempSync(path.join(tmpdir(), 'content-engine-'));
@@ -311,6 +314,26 @@ test('ready: moves gate-approved scripted items to ready_to_shoot', () => {
   assert.equal(result.skipped, 1);
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'ready_to_shoot');
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 2').get().status, 'scripted');
+  db.close();
+});
+
+test('ready: writes script.txt into the shoot folder for the human to read', () => {
+  const db = freshDb();
+  const script = validScriptJson();
+  db.prepare(
+    "INSERT INTO content_items (title, status, script) VALUES ('Approved script', 'scripted', ?)"
+  ).run(script);
+  approveGateSync(db, 'script_review', 1);
+  new ContentEngine(db).ready();
+
+  const p = path.join(process.env.CONTENT_OS_DATA_DIR, 'vid1', 'script.txt');
+  assert.ok(existsSync(p), 'script.txt is written into data/vid<id>/');
+  const text = readFileSync(p, 'utf8');
+  const parsed = JSON.parse(script);
+  assert.ok(text.includes(parsed.hook), 'the hook is in the read file');
+  assert.ok(text.includes(parsed.cta), 'the cta is in the read file');
+  assert.ok(!/the problem/i.test(text), 'no point titles leak into the read file');
+  assert.ok(text.trim().split('\n').length >= 3, 'spoken lines are one per line');
   db.close();
 });
 

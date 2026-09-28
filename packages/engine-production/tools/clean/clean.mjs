@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadStyle } from '../../src/style.mjs';
 import { buildCuts } from './lib/cut.mjs';
-import { repairWordsWithScript } from './lib/script.mjs';
+import { wordFixes, applyWordFixes } from './lib/script.mjs';
 import { assertNotInput } from './lib/guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -197,6 +197,43 @@ function cutVideo({ video, audio, keeps, crf, fpsRational, audioBitrate, out, fo
   rmSync(segDir, { recursive: true, force: true });
 }
 
+/** One answers file the agent fills: lines, wrong words, asides. */
+function printReview(review) {
+  const unsure = review.lines.filter((L) => L.status === 'missing');
+  console.log('\nlines — engine placed these out of the script; set "decision" to "keep" or "skip"');
+  review.lines.forEach((L) => {
+    const mark = L.status === 'found' ? 'found' : 'not found';
+    const heard = L.heard ? `  heard: ${L.heard.slice(0, 80)}` : '';
+    console.log(`  ${String(L.line + 1).padStart(2)}  ${mark.padEnd(9)}  ${L.decision.padEnd(4)}  ${L.script.slice(0, 70)}${heard}`);
+  });
+  if (unsure.length) console.log(`  -> ${unsure.length} line(s) not found: ${unsure.map((L) => L.line + 1).join(',')}`);
+
+  if (review.words.length) {
+    console.log('\nwords — engine heard one thing, the script says another; set "decision" to "fix" or "leave"');
+    review.words.forEach((w) => {
+      console.log(`  @${fmt(w.at).padStart(8)}  ${w.decision.padEnd(5)}  heard "${w.heard}"  ->  "${w.fix}"`);
+    });
+  }
+
+  console.log(`\nasides (${review.asides.length}) — set "decision" to "keep" or "drop"`);
+  review.asides.forEach((a, i) => {
+    console.log(`  ${String(i + 1).padStart(2)}  ${a.decision.padEnd(4)}  ${fmt(a.start)} .. ${fmt(a.end)}  ` +
+      `${(a.end - a.start).toFixed(1).padStart(5)}s  ${a.text.slice(0, 70)}`);
+  });
+}
+
+/** Things the eye would catch on the render, flagged before anything is cut. */
+function printWarnings(warnings) {
+  console.log(`\ncheck these before you approve (${warnings.length})`);
+  for (const w of warnings) {
+    if (w.kind === 'silence') {
+      console.log(`  SILENCE  ${fmt(w.start)} .. ${fmt(w.end)}  ${w.seconds}s of dead air left inside a take`);
+    } else if (w.kind === 'repeat') {
+      console.log(`  REPEAT   line ${w.line + 1}  says "${w.phrase}" twice  (${fmt(w.start)} .. ${fmt(w.end)})`);
+    }
+  }
+}
+
 function main() {
   const { pos, flags, opts } = parseArgs(process.argv.slice(2));
   const folderArg = pos[0] ?? 'data/vid1';
@@ -278,35 +315,92 @@ function main() {
     : null;
   if (script) console.log(`  script ${script.length} line(s) (${path.basename(scriptPath)})`);
 
+  // the agent's one answers file: not-sure lines, wrong words, asides
+  const reviewPath = path.join(folder, `${base}.review.json`);
+  const priorReview = existsSync(reviewPath) ? JSON.parse(readFileSync(reviewPath, 'utf8')) : null;
+
   // 4. build the cut list
   const result = buildCuts({
     words,
     span: { start: align.overlap_start, end: align.overlap_end },
     silences,
     script,
-    config: { ...cleanCfg, frameFps: video.probe.fps },
+    config: { ...cleanCfg, frameFps: video.probe.fps, review: priorReview },
   });
   if (result.qa) {
     const q = result.qa;
-    const miss = q.missing.length ? `  MISSING lines ${q.missing.map((n) => n + 1).join(',')}` : '';
-    console.log(`  check  ${q.kept}/${q.lines} line(s) kept${miss}  (lines with retries: ${q.retried.length})`);
+    const miss = q.missing.length ? `  lines the engine could not place: ${q.missing.map((n) => n + 1).join(',')}` : '';
+    const asides = q.asides ? `  asides ${q.keptAsides}/${q.asides} kept` : '';
+    console.log(`  check  ${q.kept}/${q.lines} line(s) kept${miss}  (lines with retries: ${q.retried.length})${asides}`);
   }
+
+  // write the review file: keep decisions and windows the agent already set
+  const priorLine = new Map((priorReview?.lines ?? []).map((L) => [L.line, L]));
+  const keepWord = new Map((priorReview?.words ?? []).map((w) => [w.index, w.decision]));
+  const keepAside = new Map((priorReview?.asides ?? []).map((a) => [Math.round(a.start * 10), a.decision]));
+  const proposed = script ? wordFixes(words, script) : [];
+  const proposedIdx = new Set(proposed.map((w) => w.index));
+  const extra = (priorReview?.words ?? [])
+    .filter((w) => !proposedIdx.has(w.index) && Number.isInteger(w.index) && w.index >= 0 && w.index < words.length)
+    .map((w) => ({ index: w.index, at: words[w.index].start, heard: words[w.index].text, fix: w.fix, decision: w.decision ?? 'leave' }));
+  const review = {
+    lines: (result.lines ?? []).map((L) => {
+      const p = priorLine.get(L.line);
+      return {
+        ...L,
+        start: Number.isFinite(p?.start) ? p.start : L.start,
+        end: Number.isFinite(p?.end) ? p.end : L.end,
+        decision: p?.decision ?? (L.status === 'found' ? 'keep' : 'skip'),
+      };
+    }),
+    words: [
+      ...proposed.map((w) => ({ ...w, decision: keepWord.get(w.index) ?? 'leave' })),
+      ...extra,
+    ],
+    asides: (result.asides ?? []).map((a) => ({ ...a, decision: keepAside.get(Math.round(a.start * 10)) ?? 'drop' })),
+    cuts: priorReview?.cuts ?? [],
+  };
+  guardOutput(reviewPath, INPUTS);
+  writeFileSync(reviewPath, JSON.stringify(review, null, 2), 'utf8');
+
   const cutsPath = path.join(folder, `${base}.cuts.json`);
   guardOutput(cutsPath, INPUTS);
   writeFileSync(
     cutsPath,
-    JSON.stringify({ align, span: result.span, stats: result.stats, cuts: result.cuts, keeps: result.keeps }, null, 2),
+    JSON.stringify({ align, span: result.span, stats: result.stats, cuts: result.cuts, keeps: result.keeps, warnings: result.warnings }, null, 2),
     'utf8',
   );
 
+  // the whole edit, as text: one paragraph per kept line, in order. Reading by
+  // line (not by cut segment) keeps a phrase together across a trimmed pause,
+  // the same way the video joins the two sides of a cut.
+  const fixed = applyWordFixes(words, review.words);
+  const readPath = path.join(folder, `${base}.read.txt`);
+  guardOutput(readPath, INPUTS);
+  const agentCuts = review.cuts ?? [];
+  const cutOut = (w) => agentCuts.some((c) => w.start < c.end - 1e-6 && w.end > c.start + 1e-6);
+  const readText = review.lines
+    .filter((L) => L.decision === 'keep')
+    .map((L) => ({ L, s: L.start ?? L.candidate?.start, e: L.end ?? L.candidate?.end }))
+    .filter((x) => Number.isFinite(x.s) && Number.isFinite(x.e))
+    .sort((a, b) => a.s - b.s)
+    .map(({ s, e }) => fixed.filter((w) => w.start >= s - 1e-6 && w.end <= e + 1e-6 && !cutOut(w)).map((w) => w.text).join(' ').trim())
+    .filter(Boolean);
+  writeFileSync(readPath, `${readText.join('\n\n')}\n`, 'utf8');
+
   console.log(`\nproposed cuts (${result.cuts.length}) — nothing has been cut\n`);
   printTable(result.cuts);
+  printReview(review);
+  if (result.warnings?.length) printWarnings(result.warnings);
   const total = result.stats.kept + result.stats.removed;
   const pct = total ? (result.stats.removed / total) * 100 : 0;
   console.log(`\n  ${fmt(align.overlap_duration)} -> ${fmt(result.stats.kept)}   removed ${fmt(result.stats.removed)} (${pct.toFixed(1)}%)`);
 
   if (!apply) {
-    console.log(`\n  review the list, then: npm run clean -- ${folderArg} --apply\n`);
+    console.log(`\n  READ  ${path.relative(process.cwd(), readPath).replace(/\\/g, '/')}  — the whole edit, top to bottom.`);
+    console.log(`  EDIT  ${path.basename(reviewPath)}  — set each line keep/skip, each word fix/leave, each aside keep/drop.`);
+    console.log('\n  Nothing is cut until you approve. When the read looks right:');
+    console.log(`    npm run clean -- ${folderArg} --apply\n`);
     return;
   }
 
@@ -321,7 +415,7 @@ function main() {
     crf, fpsRational: video.probe.fpsRational, audioBitrate, out: cleaned, folder,
   });
 
-  writeFileSync(path.join(folder, `${base}.cleaned.transcript.json`), JSON.stringify(repairWordsWithScript(remapTranscript(words, result.keeps), script), null, 2), 'utf8');
+  writeFileSync(path.join(folder, `${base}.cleaned.transcript.json`), JSON.stringify(remapTranscript(applyWordFixes(words, review.words), result.keeps), null, 2), 'utf8');
 
   const cProbe = probe(cleaned);
   const mb = (statSync(cleaned).size / 1e6).toFixed(0);

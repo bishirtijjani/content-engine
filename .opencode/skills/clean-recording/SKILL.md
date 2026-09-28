@@ -1,126 +1,144 @@
 ---
 name: clean-recording
-description: Turn a raw recording into one clean video — sync the separate high-quality audio to the camera video, then cut pauses and wrong takes. Use when the user drops raw footage plus a separate audio recording in a folder and wants it cleaned, or says "clean this recording", "sync the audio", "cut the pauses", "remove my restarts".
+description: Turn a raw recording into one clean video — sync the separate high-quality audio to the camera video, then cut it down to the script read once. Use when the user drops raw footage plus a separate audio recording in a folder and wants it cleaned, or says "clean this recording", "sync the audio", "cut the pauses", "remove my restarts".
 ---
 
 # Clean a recording
 
 You turn one raw recording into one clean video. The cleaner
-(`packages/engine-production/tools/clean/`) does the work. It is deterministic:
-the same folder always gives the same cut list, whatever model runs it.
+(`packages/engine-production/tools/clean/`) does the mechanical work. It runs
+BEFORE the production engine. Neither ever modifies the raw footage.
 
-This runs BEFORE the production engine. The production engine then adds captions
-and graphics. The cleaner and the engine never modify the raw footage.
+## The rule of this tool
+
+The engine works. The agent decides. The engine is deterministic and cannot
+judge meaning, so every judgement goes to the agent in **one file**
+(`<name>.review.json`). The engine proposes; the agent answers; the engine obeys.
+Never let the engine guess relevance, a misheard word, or whether two takes are
+the same line.
 
 ## Input
 
-One folder, `data/<name>/`, containing exactly:
+One folder, `data/<name>/`, containing:
 
 - **one video** — the camera file, with its own scratch audio (the anchor for sync)
 - **one audio** — the separate high-quality recording
-- optional **`script.txt`** — the script you read from
+- **`script.txt`** — the script, one line per line-as-read (the spine)
 
-Anything else in the folder is ignored. More than one video or audio is an error.
+When the item came from the content engine, `ready()` already made this folder
+as `data/vid<id>/` and wrote `script.txt` from the approved script. Record by
+reading that file, then drop the camera video and the audio into it.
 
-## The two commands
+## The loop
 
 ```bash
-npm run clean -- data/vid1           # propose: print the cut list, cut nothing
-npm run clean -- data/vid1 --apply   # apply the cut list after approval
+npm run clean -- data/vid1           # propose: cut list + read + review file
+# read data/vid1/vid1.read.txt, edit data/vid1/vid1.review.json
+npm run clean -- data/vid1           # re-run until the read is clean
+npm run clean -- data/vid1 --apply   # render the cleaned video
 ```
 
-Add `--realign` to ignore the cached alignment and measure again.
-Add `--model small.en` to use a bigger speech model (slower, more accurate).
+`--realign` ignores the cached alignment. `--model small.en` uses a bigger
+speech model.
 
 ## The gate (mandatory)
 
-Running the cleaner **without** `--apply` only proposes. It prints a table of
-every cut with its time and reason. **Show that table to the human and wait for
-their yes.** Never run `--apply` on your own judgement. Cuts are a human
+A plain run only proposes. It prints the cut list, the read, and any warnings,
+and writes the review file. **Nothing is cut until `--apply`, and `--apply` only
+after the human has read `<name>.read.txt` and approved.** Cuts are a human
 decision, exactly like the engine's gates.
+
+## With a script (the usual case)
+
+The script is the spine. The cleaner aligns the spoken words to the script
+lines, keeps the **last take of each line**, and cuts everything else. It reads
+`script.txt`; without it, falls back to pauses + repeats.
+
+The engine cannot judge these, so it hands them over in `<name>.review.json`:
+
+- **lines** — every script line: `found` or `missing`, the words `heard`, and
+  `decision`: `keep` or `skip`. A line the engine could not place carries the
+  nearest words it heard as `candidate`. Edit `start`/`end` to trim a line's
+  window.
+- **words** — the engine heard one thing, the script says another: `heard`,
+  `fix`, and `decision`: `fix` or `leave` (default `leave` — the engine never
+  edits text on its own).
+- **asides** — stretches between takes (earlier tries, self-talk, detours):
+  `decision`: `keep` (relevant) or `drop` (default).
+- **cuts** — time ranges you add by hand: a repeated take the engine missed, a
+  stumble, a cut-off point. `{ "start", "end", "why" }`.
+
+Decisions, trimmed windows, and hand cuts are preserved across re-runs.
+
+## Before you approve
+
+1. **Read `<name>.read.txt`.** The whole edit, one paragraph per kept line, in
+   order. It matches the video: a trimmed pause joins the two words, so a phrase
+   split by a pause still reads as one line.
+2. **Clear every warning.** The run flags what the eye would catch:
+   - `SILENCE` — a long pause left inside a take.
+   - `REPEAT` — the same phrase said twice in one line (two takes slipped in).
+   Settle them with a `cut` or a line `start`/`end` trim, re-run, and confirm
+   the warnings are gone.
+3. Then `--apply`.
 
 ## What it does, in order
 
-1. **align** — measures the offset and clock drift between the camera's audio and
-   the recording, down to the sample (`align.py`). Refuses to continue if the
-   match is weak.
-2. **place** — puts the recording on the video's timeline (`place.py`).
-3. **silence** — measures the silent stretches from the audio itself
-   (`silence.py`). Pauses never come from the transcript, so a word the speech
-   model missed can never be cut.
+1. **align** — offset and clock drift between the camera audio and the recording
+   (`align.py`). Refuses to continue if the match is weak.
+2. **place** — the recording on the video timeline (`place.py`).
+3. **silence** — silent stretches measured from the audio (`silence.py`). Pauses
+   come from measured audio, never from transcript gaps.
 4. **words** — a word-timed transcript of the aligned audio (`transcribe.py`).
-5. **cuts** — pauses, filler words, self-talk, and repeated takes (`lib/cut.mjs`).
+5. **cuts** — the script-led cut (`lib/script.mjs` + `lib/cut.mjs`).
 
 ## What it cuts
 
-- **pauses** — silence measured from the audio, trimmed to a short breath.
-- **fillers** — "um", "uh", and similar.
-- **self-talk** — asides said to himself: "start again", "I'm supposed to",
-  counting "three two one". Matched on the words themselves, so a countdown
-  stuck to the start of a line is removed on its own.
-- **repeated takes** — a line said more than once. The **last** try is kept;
-  the first try and everything said up to it (including any aside in between)
-  is removed. This is the main fix for reading a script line by line and
-  restarting.
-- **false starts** — a short fragment the next line repeats from the top.
-- **tags** — a watermark a service baked into the audio (e.g. Auphonic's free
-  "free audio post production by auphonic.com"). Removed only at the very start
-  or end, never mid-video.
-
-A short fragment right before a repeated line is treated as the same broken
-sentence and removed with it.
-
-Each step is cached next to the video (`<name>.align.json`, `.aligned.wav`,
-`.silences.json`, `.transcript.json`, `.cuts.json`). Re-running reuses the cache;
-only the final cut re-encodes.
+- **earlier tries** — for each line, the last take is kept; the first take and
+  anything said up to it is dropped.
+- **off-script stretches** — between takes, unless the agent marks them `keep`.
+- **pauses** — measured silence, trimmed clear of any word.
+- **fillers** and **self-talk** — inside a kept take.
+- **tags** — a baked-in watermark at the very start or end (Auphonic's free tag).
 
 ## Output
 
 `data/<name>/<name>.cleaned.mp4` plus `<name>.cleaned.transcript.json`. The
-aligned `.wav` is kept so re-runs stay fast — do not delete the sidecars.
-
-After the human is happy with the clean, hand it to the production engine:
+`aligned.wav` is kept so re-runs stay fast — do not delete the sidecars. Hand
+the clean to the production engine:
 
 ```js
 engine.processFootage({ targetId, filePath: 'data/vid1/vid1.cleaned.mp4' });
 ```
 
-`edit()` reuses `<name>.cleaned.transcript.json` for captions instead of
-listening again.
+`edit()` reuses `<name>.cleaned.transcript.json` for captions.
 
 ## Tuning (in `config/style.json` → `clean`)
 
-- `gapMin` — shortest silence to trim (seconds). Raise it to cut fewer pauses.
-- `gapKeep` — silence left after the previous word.
-- `minCut` — shortest pause cut allowed.
-- `fillers` — words removed on sight.
-- `selfTalk` — asides removed on sight (whole-word phrases).
-- `selfTalkExact` — single words removed only when the whole line is that word.
-- `tags` — a baked-in watermark's phrases; `tag` — how close to the start or end
-  it must be, and the gap that still counts as one tag.
-- `retake` — how two takes are judged the same line (similarity, words compared,
-  false-start length).
-- `repeat` — how far apart two tries can be, how many lines ahead to look, the
-  shortest line treated as a repeat, and how close a fragment must be to join a
-  repeat cut.
+- `gapMin` / `gapKeep` / `minCut` — pause thresholds.
+- `fillers` / `selfTalk` / `selfTalkExact` — words and asides removed on sight.
+- `tags` / `tag` — a baked-in watermark's phrases and how close to the edges.
+- Line matching (defaults in `lib/script.mjs`): `tailWindow`, `runGap`,
+  `regionTol`, and the anchor/miss budgets.
 
-Change a number, re-run. Alignment, audio, silence and words stay cached; only
-the cut re-encodes (the slow part, ~minutes for a long video).
+Change a number, re-run. Alignment, audio, silence, and words stay cached; only
+the cut re-encodes.
 
 ## Cost
 
 - align / place / silence / words: cached after the first run.
-- the cut: one re-encode of the whole video. This is the slow step.
-- the final video is encoded at most twice total: once here, once by the render.
+- the cut: one re-encode of the video (the slow step).
+- the final video is encoded at most twice: once here, once by the render.
 
 ## Hard rules
 
-- The cleaner **never** writes to the video or the audio. It only reads them,
-  and refuses any output path that equals an input.
-- Never `--apply` without showing the cut list and getting the human's yes.
+- The cleaner **never** writes to the video or the audio; it refuses any output
+  path that equals an input.
+- Never `--apply` without the human reading `<name>.read.txt` and saying yes.
+- The engine never edits text on its own (word fixes default to `leave`).
 - Pauses come from measured audio silence, never from transcript gaps.
 
 ## Windows
 
 - Always run `node` with `--disable-warning=ExperimentalWarning`.
-- Python and ffmpeg must be on PATH (the cleaner shells out to both).
+- Python and ffmpeg must be on PATH.

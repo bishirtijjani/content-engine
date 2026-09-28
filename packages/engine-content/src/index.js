@@ -20,7 +20,9 @@
 //   engine.run({ action: 'evaluate' })     — specific action
 //   engine.run({ targetId: 3 })            — process specific item
 //   engine.run({ dryRun: true })           — preview without changes
-import { BaseEngine, contentItem, playbookRule, transition, requestGate } from '@content-os/core';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { BaseEngine, PROJECT_ROOT, contentItem, playbookRule, transition, requestGate } from '@content-os/core';
 
 // ---------------------------------------------------------------------------
 // Scoring weights — configurable via settings.content_weights
@@ -540,9 +542,16 @@ export class ContentEngine extends BaseEngine {
         reason: 'script approved — ready to shoot',
       });
 
+      // The script is the spine of the clean. Freeze it into the shoot folder
+      // the recording will be dropped into, so the file the human reads from IS
+      // the script the cleaner aligns to. `data/vid<id>/script.txt`.
+      const shoot = this._writeShootScript(item);
+
       this.log('ready', {
         targetType: 'content_item', targetId: item.id,
-        message: 'moved to ready_to_shoot',
+        message: shoot
+          ? `moved to ready_to_shoot; record, then drop the video + audio in ${shoot.dir}`
+          : 'moved to ready_to_shoot (no script.txt written — script missing or invalid)',
       });
       processed++;
     }
@@ -553,6 +562,40 @@ export class ContentEngine extends BaseEngine {
         : `${processed} item(s) ready to shoot, skipped ${skipped}`,
     });
     return { processed, skipped };
+  }
+
+  /**
+   * Write the shoot folder + `script.txt` for a ready item: the spoken lines,
+   * one per line, from the approved script JSON (hook, then script, then cta).
+   * Spoken words only — no point titles, no headers. Idempotent: it rewrites
+   * script.txt and never touches any footage already in the folder.
+   * @returns {{ dir: string, path: string } | null} null when there is no valid script
+   */
+  _writeShootScript(item) {
+    const parsed = this._parseScript(item.script);
+    if (!parsed) return null;
+    const lines = [];
+    for (const part of [parsed.hook, parsed.script, parsed.cta]) {
+      if (typeof part !== 'string') continue;
+      for (const chunk of part.split(/\r?\n/)) {
+        for (const sentence of chunk.split(/(?<=[.!?])\s+/)) {
+          const t = sentence.replace(/\s+/g, ' ').trim();
+          if (t) lines.push(t);
+        }
+      }
+    }
+    if (!lines.length) return null;
+
+    const dir = path.join(this._dataDir(), `vid${item.id}`);
+    mkdirSync(dir, { recursive: true });
+    const scriptPath = path.join(dir, 'script.txt');
+    writeFileSync(scriptPath, `${lines.join('\n')}\n`, 'utf8');
+    return { dir: `data/vid${item.id}`, path: scriptPath };
+  }
+
+  /** Where the shoot folders live. Overridable so tests never touch the repo. */
+  _dataDir() {
+    return process.env.CONTENT_OS_DATA_DIR || path.join(PROJECT_ROOT, 'data');
   }
 
   // =========================================================================
