@@ -63,13 +63,14 @@ const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v']);
 export class ProductionEngine extends BaseEngine {
   static NAME = 'production';
   static OWNED_STATES = ['shot', 'editing'];
-  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_plan', 'edit', 'make_short', 'request_review', 'resubmit', 'schedule'];
+  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_plan', 'preview', 'edit', 'make_short', 'request_review', 'resubmit', 'schedule'];
 
   static ACTION_METHODS = {
     process_footage: 'processFootage',
     list_footage: 'listFootage',
     menu: 'menu',
     save_plan: 'savePlan',
+    preview: 'preview',
     edit: 'edit',
     make_short: 'makeShort',
     request_review: 'requestReview',
@@ -243,6 +244,71 @@ export class ProductionEngine extends BaseEngine {
       message: `plan saved (${summarizePlan(raw).overlays} overlay(s))`,
     });
     return { saved: true, plan: raw };
+  }
+
+  // =========================================================================
+  // PREVIEW — a fast, low-res render while the agent iterates
+  // =========================================================================
+
+  /**
+   * Build and render the plan at the low-res preview canvas.
+   * No asset, no gate, no state change — the agent can run it as often as it
+   * wants while the cut is being worked out. edit() is the locked, full-res
+   * render that creates the asset and asks the human to review.
+   *
+   * @returns {{ processed, skipped, path? }}
+   */
+  preview({ targetId = null, dryRun = false } = {}) {
+    if (!targetId) throw new Error('preview requires { targetId }');
+    const item = this._item(targetId);
+
+    const footage = this._primaryFootage(item.id);
+    if (!footage) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: 'no footage attached yet' });
+      return { processed: 0, skipped: 1 };
+    }
+
+    const plan = parsePlan(item.video_plan);
+    if (plan === null) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: 'no plan written yet' });
+      return { processed: 0, skipped: 1 };
+    }
+
+    const style = loadStyle();
+    const catalog = loadCatalog();
+    const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
+    const probe = this._probe(videoPath);
+    const duration = probe.duration ?? item.desired_length_seconds ?? 60;
+
+    const problems = validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) });
+    if (problems.length) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `plan failed the style check: ${problems.join(' | ')}` });
+      return { processed: 0, skipped: 1, problems };
+    }
+
+    const dims = this._renderDims(style, 'preview', probe);
+    const summary = summarizePlan(plan);
+    if (dryRun) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, message: `would render a ${dims.width}x${dims.height} preview: ${summary.overlays} overlay(s) (dry run)` });
+      return { processed: 1, skipped: 0 };
+    }
+
+    const compositionDir = path.join(COMPOSITIONS_DIR, `item-${item.id}`);
+    mkdirSync(compositionDir, { recursive: true });
+
+    const { html } = this._buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir, mode: 'preview' });
+    writeFileSync(path.join(compositionDir, 'index.html'), html, 'utf8');
+
+    mkdirSync(RENDERS_DIR, { recursive: true });
+    const outputPath = path.join(RENDERS_DIR, `item-${item.id}.preview.mp4`);
+    const render = this._renderComposition(compositionDir, outputPath, style, 'preview');
+    if (!render.success) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'error', message: `render failed: ${render.error}` });
+      return { processed: 0, skipped: 1 };
+    }
+
+    this.log('preview', { targetType: 'content_item', targetId: item.id, message: `rendered a ${dims.width}x${dims.height} preview to ${outputPath}` });
+    return { processed: 1, skipped: 0, path: outputPath };
   }
 
   // =========================================================================
@@ -779,20 +845,32 @@ export class ProductionEngine extends BaseEngine {
     return (id) => map[id] ?? null;
   }
 
-  _buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir }) {
+  /** The canvas size for a render mode (preview | final), from the style. */
+  _renderDims(style, mode, probe) {
+    const r = style?.render ?? {};
+    const cfg = r[mode] ?? r.final ?? {};
+    const width = cfg.width ?? probe?.width ?? 1920;
+    const aspect = probe?.width && probe?.height ? probe.height / probe.width : 9 / 16;
+    const height = cfg.height ?? Math.round(width * aspect);
+    return { width, height, fps: cfg.fps ?? 30 };
+  }
+
+  _buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir, mode = 'final' }) {
     const mediaSrc = this._sourceInto(compositionDir, videoPath);
     const words = this._transcriptFor(compositionDir, videoPath);
+    const dims = this._renderDims(style, mode, probe);
     const { html, overlayCount } = buildComposition({
       words,
       videoSrc: mediaSrc,
-      width: probe.width,
-      height: probe.height,
+      width: dims.width,
+      height: dims.height,
       duration,
       style,
       lexiconPath: LEXICON_PATH,
       plan,
       resolveVisual: this._copyVisuals(plan.overlays, compositionDir, catalog),
       audioOnly: probe.audioOnly,
+      fps: dims.fps,
     });
     return { html, overlayCount };
   }
@@ -823,7 +901,7 @@ export class ProductionEngine extends BaseEngine {
   }
 
   /** Render a HyperFrames composition to MP4 at the locked output quality. */
-  _renderComposition(compositionDir, outputPath, style = null) {
+  _renderComposition(compositionDir, outputPath, style = null, mode = 'final') {
     const env = { ...process.env };
     if (!env.HYPERFRAMES_BROWSER_PATH) {
       const chromePaths = [
@@ -835,13 +913,30 @@ export class ProductionEngine extends BaseEngine {
       }
     }
 
-    const crf = (style ?? loadStyle())?.output?.crf;
+    // The engine owns the render settings (config/style.json -> render), so
+    // HyperFrames never guesses. Passing -w explicitly overrides its low-memory
+    // pin and its auto worker sizing; --no-low-memory-mode keeps hardware GPU
+    // capture, which low-memory mode would force to software. fps comes from the
+    // mode (preview | final). --experimental-fast-capture is deliberately unused:
+    // drawElement self-verification fails on this composition.
+    const s = style ?? loadStyle();
+    const r = s?.render ?? {};
+    const crf = s?.output?.crf;
+    const fps = r[mode]?.fps ?? r.fps;
+
     const args = [
-      '--disable-warning=ExperimentalWarning', HYPERFRAMES_BIN, 'render', compositionDir, '-o', outputPath, '--no-browser-gpu',
+      '--disable-warning=ExperimentalWarning', HYPERFRAMES_BIN, 'render', compositionDir, '-o', outputPath,
     ];
     if (crf != null) args.push('--crf', String(crf));
+    if (r.workers != null) args.push('-w', String(r.workers));
+    if (fps != null) args.push('-f', String(fps));
+    if (r.quality) args.push('-q', String(r.quality));
+    args.push(r.browserGpu === false ? '--no-browser-gpu' : '--browser-gpu');
+    if (r.lowMemoryMode === false) args.push('--no-low-memory-mode');
+    else if (r.lowMemoryMode === true) args.push('--low-memory-mode');
+    if (r.protocolTimeoutMs != null) args.push('--protocol-timeout', String(r.protocolTimeoutMs));
 
-    const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 300000, env });
+    const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: r.timeoutMs ?? 1800000, env });
 
     if (result.error) return { success: false, error: result.error.message };
     if (result.status !== 0) return { success: false, error: `exit code ${result.status}: ${result.stderr?.slice(0, 500)}` };

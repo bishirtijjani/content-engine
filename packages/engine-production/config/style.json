@@ -82,6 +82,18 @@
     "note": "Used by both the cleaner's cut and the render, so the final size is predictable. crf 18 is visually lossless; preset veryfast is the speed choice for this machine. The picture is encoded at most twice: once by the cleaner, once by the render."
   },
 
+  "render": {
+    "note": "The engine owns how HyperFrames renders, so it never guesses. workers and fps are passed explicitly; this overrides HyperFrames' low-memory pin and its auto worker sizing. On an 8 GB machine, floor(RAM*0.5/1536MB) = 2 workers is the safe ceiling; more spills to the page file and slows the render. lowMemoryMode:false keeps hardware GPU capture (low-memory mode would force software). timeoutMs is the spawnSync budget. preview is the fast, low-res canvas the agent iterates on (no asset, no gate); final is the locked, full-res render. --experimental-fast-capture is NOT used: drawElement self-verification fails on this composition.",
+    "workers": 2,
+    "quality": "standard",
+    "browserGpu": true,
+    "lowMemoryMode": false,
+    "protocolTimeoutMs": 900000,
+    "timeoutMs": 1800000,
+    "preview": { "width": 640, "height": 360, "fps": 12 },
+    "final": { "width": 1920, "height": 1080, "fps": 24 }
+  },
+
   "clean": {
     "note": "How the cleaner turns raw footage into one cleaned video. Silences are measured from the audio, never guessed from the transcript, so a word the model missed is never cut. The cleaner shows the cut list and never cuts without a human yes. gapMin = shortest silence worth trimming (s). gapKeep = silence left after the previous word (s). minCut = shortest pause cut allowed (s). cutPadEnd = silence left before the next word (s). edgeKeep = silence left at the very start and end (s). pad = room left around a filler, self-talk or false-start cut (s). minKeep = a kept clip shorter than this is absorbed into a cut (s). utteranceGap = silence that ends a spoken line (s). fillers = words removed on sight. selfTalk = asides said to himself, matched on the words themselves, so a countdown stuck to the start of a line is removed on its own. selfTalkExact = single words removed only when the whole line is that one word. tags = phrases of a watermark baked into the audio (e.g. Auphonic's free tag), removed only at the very start or end; tag = gap that still counts as one tag and how close to the start/end it must be. retake = false starts: maxGap = how close (s) a short line and the line that repeats it must be, similarity = word overlap that marks two lines as the same, maxWords = words compared per line, shortStart = a line this short that the next repeats from the top. repeat = a line said more than once: keep the last try and remove the first try plus everything said up to the last try; window = how far apart (s) the tries can be, maxAhead = how many spoken lines ahead to look, minWords = lines shorter than this are never treated as repeats, minPrefix = same opening words that mark two lines as the same, shortLine = a line this short repeated from the top is the same line, orphanGap = a short fragment this close (s) before a try joins its cut. inline = a phrase said twice in one breath: maxWords = longest repeated phrase to look for, minWords = shortest (1 catches 'the the'), gapWords = words allowed between the copies.",
     "gapMin": 0.3,
