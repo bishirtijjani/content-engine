@@ -162,6 +162,54 @@ engine.schedule({ targetId });                 // after approval -> scheduled
 - `make_short()` only packages a start/end the human and agent agreed on. The
   agent suggests candidates; it does not decide.
 
+### Rendering (required) — detached, never block the chat
+
+A render on this machine takes ~8–16 min for a full-length video. The agent MUST
+launch it as a detached background process and keep talking to the human while
+it runs. Never sit and wait, and never make the human wait in silence.
+
+**The one rule that matters: after launching a render, RETURN IMMEDIATELY.**
+Do not run a long `sleep`, do not poll in a loop, do not run any command whose
+only job is to wait for the render. Hand control straight back to the chat and
+answer the human. A queued human message means the agent is parked inside a
+blocking command — that is the bug. The render does not need the agent to watch
+it; it needs the agent to be reachable.
+
+1. **Preview while editing, final once locked.** The human iterates with the
+   fast preview (`render.preview` in `config/style.json`, 480×270) and only
+   locks the full render (`render.final`, 1080p) when the cut is approved.
+   Captions never change between them.
+2. **Launch detached.** Start the render with a real background process and
+   write logs + a PID file, e.g.
+   `data/renders/_<job>.out`, `data/renders/_<job>.err`,
+   `data/renders/_<job>.pid`. The render keeps running independent of the chat.
+   Then stop — say "started at HH:MM, ETA ~N min" and return to the chat.
+3. **Poll only when asked.** The human asks "status" (or anything); the agent
+   runs ONE read-only check and answers in a line or two: process alive, phase
+   (capture / encode / assemble), frames done / total, elapsed, ETA, and the
+   output path when finished. Then return. Never chain polls; never wait.
+4. **Direct HyperFrames is the proven path.** The direct CLI completes reliably:
+   ```
+   node --disable-warning=ExperimentalWarning node_modules/hyperframes/bin/hyperframes.mjs \
+     render <compositionDir> -o <out.mp4> --crf 18 -w 2 -f 24 -q standard \
+     --browser-gpu --no-low-memory-mode
+   ```
+   Set `HYPERFRAMES_BROWSER_PATH` to Chrome first. `-w 2` is the ceiling on an
+   8 GB machine (HyperFrames' own budget is 1536 MB/worker); passing `-w`
+   explicitly bypasses HyperFrames' low-memory pin and 1-worker choice.
+   Do NOT pass `--experimental-fast-capture`: drawElement self-verification
+   fails on these compositions.
+5. **Machine must stay awake.** A render dies if the machine sleeps mid-render
+   (the human's lid-close sleeps are intentional; coordinate, don't disable
+   power settings).
+
+### Style-owned render settings
+
+`config/style.json` → `render` is the ONE place render behavior lives:
+`workers`, `quality`, `browserGpu`, `lowMemoryMode`, `protocolTimeoutMs`,
+`timeoutMs`, and the two canvases `preview` (640×360) and `final` (1920×1080).
+The engine owns these; HyperFrames never decides for us.
+
 ### Plan contract
 
 `content_items.video_plan` is structured JSON. Every field is optional; an
@@ -232,6 +280,27 @@ screenshots, screen recordings, your own video, graphics, diagrams. No stock
 footage. All of it sits on the burnt orange canvas; the orange shows around the
 edges. Visuals never enter the caption band. The rule lives in
 `config/style.json` under `doctrine`.
+
+The editorial rubric is in `config/style.json` under `doctrine.editorial` (the
+source of truth) and is returned by `engine.menu()`. Before writing a plan, for
+each narration beat answer these in order:
+
+1. Leave the face? Only when the visual gives more information, clarity,
+   emphasis or narrative value than staying on the face. If it does not
+   materially improve the communication, stay on the face.
+2. What type? real screen/UI or filmed action → `visual`; numbers, claims,
+   lists, takeaways, quotes, CTA, title → a `graphic` card; relationships,
+   processes, architecture → a `graphic` diagram; a supporting note or button →
+   a `graphic` split card.
+3. Full or split? A graphic's frame comes from its template. A visual is `full`
+   when the viewer must inspect or read it, `left`/`right` when it only supports
+   what is said.
+4. Why? One sentence naming the value. The video must be worse without it.
+5. When? Enter on the words that need it, leave when they end. One at a time.
+6. Motion? Only for a hit: one emphasis word per caption, one zoom on a payoff,
+   at most one sfx cue per overlay. Default is still.
+7. Required or optional? Delete it in your head. If the explanation is still
+   complete, it was optional — delete it.
 
 ### The locked style
 

@@ -152,6 +152,7 @@ test('edit: dry-run processes with footage and a valid plan', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status, video_plan) VALUES ('Edit', 'shot', '{}')").run();
   attachFootage(db, 1);
+  approveGateSync(db, 'plan_review', 1);
   const result = new ProductionEngine(db).edit({ targetId: 1, dryRun: true });
   assert.equal(result.processed, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assets').get().n, 0);
@@ -375,7 +376,7 @@ test('savePlan: stores a builder-made plan', () => {
   const engine = new ProductionEngine(db);
   const plan = engine.newPlan()
     .caption({ emphasis: ['automated'] })
-    .graphic({ at: [1, 4], name: 'stat-callout', fields: { value: '8 hrs', label: 'saved' }, why: 'show the hours saved' });
+    .graphic({ at: [8, 12], name: 'stat-callout', fields: { value: '8 hrs', label: 'saved' }, why: 'show the hours saved' });
   const result = engine.savePlan({ targetId: 1, plan });
   assert.equal(result.saved, true);
   const stored = JSON.parse(db.prepare('SELECT video_plan FROM content_items WHERE id = 1').get().video_plan);
@@ -400,5 +401,43 @@ test('savePlan: refuses an off-style plan', () => {
 test('savePlan: throws without a target', () => {
   const db = freshDb();
   assert.throws(() => new ProductionEngine(db).savePlan({ plan: {} }), /targetId/);
+  db.close();
+});
+
+test('reviewPlan: opens a plan_review gate and returns the board', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Board', 'shot')").run();
+  const engine = new ProductionEngine(db);
+  engine.savePlan({
+    targetId: 1,
+    plan: { captions: { emphasis: ['automate'] }, overlays: [{ kind: 'graphic', name: 'key-point', start: 8, end: 12, why: 'land the point', fields: { line: 'Automate the work' } }], zooms: [], sfx: [] },
+  });
+  const r = engine.reviewPlan({ targetId: 1 });
+  assert.equal(r.processed, 1);
+  assert.equal(r.board.overlays.length, 1);
+  assert.equal(r.board.overlays[0].frame, 'center');
+  assert.deepEqual(r.board.emphasis, ['automate']);
+  const gate = db.prepare("SELECT status FROM gates WHERE gate_type = 'plan_review' AND target_id = 1").get();
+  assert.equal(gate.status, 'pending');
+  db.close();
+});
+
+test('edit/preview refuse until the plan_review gate is approved', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Gate', 'shot')").run();
+  attachFootage(db, 1);
+  const engine = new ProductionEngine(db);
+  engine.savePlan({
+    targetId: 1,
+    plan: { captions: {}, overlays: [], zooms: [], sfx: [] },
+  });
+
+  const blocked = engine.edit({ targetId: 1 });
+  assert.equal(blocked.processed, 0);
+  assert.equal(blocked.needsPlanReview, true);
+  assert.ok(blocked.board);
+
+  approveGateSync(db, 'plan_review', 1);
+  assert.equal(engine._planReviewApproved(1), true);
   db.close();
 });

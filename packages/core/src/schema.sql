@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS calendar_entries (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gates (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  gate_type      TEXT NOT NULL,            -- idea_approval | script_review | asset_review | escalation
+  gate_type      TEXT NOT NULL,            -- idea_approval | script_review | plan_review | asset_review | escalation
   target_type    TEXT NOT NULL,            -- content_item | asset | engagement_item
   target_id      INTEGER NOT NULL,
   status         TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected

@@ -8,7 +8,29 @@
     "onScreen": ["screenshot", "screen recording", "your own video", "graphic", "diagram"],
     "noStockFootage": true,
     "keepOut": "Visuals never enter the caption band.",
-    "screenRule": "If they need to look at it, it takes the screen (frame 'full' or 'center'). If it only supports what you are saying, it shares the screen (frame 'left' or 'right')."
+    "screenRule": "If they need to look at it, it takes the screen (frame 'full' or 'center'). If it only supports what you are saying, it shares the screen (frame 'left' or 'right').",
+    "hook": {
+      "rule": "The hook is always you, talking to camera. No takeover overlay (frame 'full' or 'center') may start before the first sentence lands — the opening belongs to your face, never to a b-roll or a card. A split frame ('left' or 'right') is fine because your face stays on screen.",
+      "keepFaceSeconds": 6
+    },
+    "editorial": {
+      "principle": "Change the visual only when the new visual gives more information, clarity, emphasis or narrative value than staying on the face.",
+      "stayOnFace": "Stay on the face when another visual does not materially improve the communication.",
+      "gate": "For each narration beat, find a concrete thing to see (number, name, screen, place, result, product), a structure the ear cannot hold (process, relationship, architecture, sequence, comparison), a payoff (stat, quote, takeaway, CTA), or the real thing worth showing. If none is true, stay on the face.",
+      "carrier": [
+        { "what": "real screen or UI", "use": "visual", "frame": "full" },
+        { "what": "real action or subject you filmed", "use": "visual", "frame": "full" },
+        { "what": "number, claim, takeaway, quote, CTA, title", "use": "graphic (center cards)", "frame": "center" },
+        { "what": "relationship, process, architecture, comparison", "use": "graphic (flow, timeline, before-after, comparison)", "frame": "full" },
+        { "what": "short supporting note, attribution, button", "use": "graphic (callout, lower-third, follow/subscribe)", "frame": "left or right" }
+      ],
+      "frame": "A graphic's frame comes from its template — never override it. A visual takes 'full' when they must inspect or read it, 'left'/'right' when it only supports what is said.",
+      "why": "One sentence naming the value from the gate. The video must be worse without it.",
+      "timing": "Enter on the words that need it, leave when they end. Hold long enough to read. One overlay at a time, no re-trigger in a beat.",
+      "motion": "Only for a hit: one emphasis word per caption, one zoom 1.12-1.15 on a payoff, at most one sfx cue per overlay. Under a takeover the template already animates. Default is still.",
+      "keepTest": "Delete it in your head. If the explanation is still complete, it was optional — delete it. Keep only what the explanation breaks without.",
+      "hook": "The first 6 seconds are always you, talking to camera; no takeover overlay before the first sentence lands."
+    }
   },
 
   "brand": {
@@ -42,13 +64,14 @@
     "style": "codeket-locked",
     "emphasis": ["AI automation", "AI engineer", "Bishir Tijjani"],
     "maxEmphasisPerPhrase": 1,
-    "font": { "baseRatio": 0.052, "emphRatio": 1.8, "plainWeight": 600, "emphWeight": 900 },
+    "font": { "baseRatio": 0.040, "emphRatio": 1.5, "plainWeight": 600, "emphWeight": 900 },
     "grouping": {
-      "maxWords": 5,
-      "maxChars": 30,
+      "maxWords": 4,
+      "maxChars": 24,
       "pauseGap": 0.7,
       "minDuration": 0.6,
-      "hold": 0.15
+      "hold": 0.15,
+      "lead": 0.08
     },
     "band": { "top": 0.72, "keepOutAbove": 0.65 }
   },
@@ -88,9 +111,9 @@
     "quality": "standard",
     "browserGpu": true,
     "lowMemoryMode": false,
-    "protocolTimeoutMs": 900000,
-    "timeoutMs": 1800000,
-    "preview": { "width": 640, "height": 360, "fps": 12 },
+    "protocolTimeoutMs": 86400000,
+    "timeoutMs": 86400000,
+    "preview": { "width": 480, "height": 270, "fps": 15 },
     "final": { "width": 1920, "height": 1080, "fps": 24 }
   },
 
@@ -144,12 +167,9 @@
   "sfx": {
     "defaultLevel": 0.5,
     "cues": {
-      "whoosh": "whoosh-soft",
-      "click": "click-ui",
-      "pop": "pop-soft",
-      "ding": "ding-notify",
-      "riser": "riser-build",
-      "impact": "impact-thud"
+      "whoosh": "sfx/whoosh",
+      "swoosh": "sfx/swoosh",
+      "click": "sfx/click"
     }
   },
 

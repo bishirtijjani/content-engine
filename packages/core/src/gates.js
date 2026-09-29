@@ -1,8 +1,9 @@
-// Human decision gates — the three non-negotiable checkpoints.
+// Human decision gates — the non-negotiable checkpoints.
 //
 // 1. idea_approval  — "yes, I'll spend my face-time on this" (before planning)
-// 2. asset_review   — "the finished video is good enough to ship" (before scheduling)
-// 3. escalation     — money, reputation, angry customers (in engagement)
+// 2. plan_review    — "this is the board; render it" (before any production render)
+// 3. asset_review   — "the finished video is good enough to ship" (before scheduling)
+// 4. escalation     — money, reputation, angry customers (in engagement)
 //
 // Gates are records in the `gates` table. Engines request them; humans decide.
 // The state machine (state.js) refuses transitions whose gate is not approved.

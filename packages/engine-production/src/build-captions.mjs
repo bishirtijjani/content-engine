@@ -110,13 +110,22 @@ export function computeCaptionScenes({
     return { segs, start: c[0].start, end: c[c.length - 1].end };
   });
 
+  // A caption stays up for every word inside it. The speaker runs words together
+  // (median inter-word gap is ~0), so ending a caption at its own last word makes
+  // it flip exactly as the next words begin — the outgoing caption vanishes while
+  // its final word is still sounding ("the captions get off the recording").
+  // Instead: lead a hair before the first word, hold past the last word, and only
+  // yield once the next caption's first word is actually starting.
+  const lead = g.lead ?? 0.08;
   for (let i = 0; i < lines.length; i++) {
     const L = lines[i];
-    L.end = Math.min(
-      Math.max(L.end, L.start + g.minDuration) + g.hold,
-      i + 1 < lines.length ? lines[i + 1].start : Infinity,
-      duration
-    );
+    const nextStart = i + 1 < lines.length ? lines[i + 1].start : Infinity;
+    const prevEnd = i > 0 ? lines[i - 1].end : 0;
+    const wantEnd = Math.max(L.end + g.hold, L.start + g.minDuration);
+    // never run past the next caption's first word (they must not overlap on screen)
+    L.end = Math.min(wantEnd, nextStart, duration);
+    // lead a hair before the first word, but never before the previous caption ends
+    L.start = Math.max(0, prevEnd, L.start - lead);
     L.start = r3(L.start);
     L.end = r3(L.end);
     L.dur = r3(Math.max(0.1, L.end - L.start));

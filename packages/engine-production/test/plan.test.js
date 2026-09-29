@@ -62,6 +62,26 @@ test('rejects a non-object plan', () => {
   assert.deepEqual(validatePlan(null, {}), ['plan must be an object']);
 });
 
+test('the hook belongs to the speaker — a takeover before the hook ends is refused', () => {
+  const takeover = {
+    overlays: [{ start: 1, end: 5, kind: 'graphic', name: 'stat-callout', why: 'open with the number', fields: { value: '7' } }],
+  };
+  const problems = validatePlan(takeover, opts);
+  assert.ok(problems.some((p) => /takes over the screen.*talking to camera/.test(p)), problems.join(' | '));
+
+  // A split overlay keeps the face on screen and is allowed during the hook.
+  const split = {
+    overlays: [{ start: 1, end: 5, kind: 'graphic', name: 'lower-third', why: 'name while the face stays on', fields: { name: 'Bishir', role: 'engineer' } }],
+  };
+  assert.deepEqual(validatePlan(split, opts), []);
+
+  // The same takeover is fine once the hook has landed.
+  const later = {
+    overlays: [{ start: 8, end: 13, kind: 'graphic', name: 'stat-callout', why: 'the number, after the hook', fields: { value: '7' } }],
+  };
+  assert.deepEqual(validatePlan(later, opts), []);
+});
+
 test('rejects an unknown overlay kind', () => {
   const problems = validatePlan({ overlays: [{ kind: 'sticker', start: 1, end: 3, why: 'x' }] }, opts);
   assert.ok(problems.some((p) => /kind must be one of/.test(p)));
@@ -95,7 +115,7 @@ test('rejects a library visual not in the library', () => {
 
 test('accepts a per-video visual file without the library', () => {
   const problems = validatePlan(
-    { overlays: [{ kind: 'visual', file: 'data/visuals/demo/dashboard.png', start: 1, end: 3, why: 'show it' }] }, opts
+    { overlays: [{ kind: 'visual', file: 'data/visuals/demo/dashboard.png', start: 8, end: 13, why: 'show it' }] }, opts
   );
   assert.deepEqual(problems, []);
 });
@@ -182,9 +202,9 @@ test('rejects an unknown sound', () => {
   assert.ok(problems.some((p) => /not in the library/.test(p)));
 });
 
-test('accepts a style cue alias as a sound', () => {
-  const problems = validatePlan({ sfx: [{ at: 5, sound: 'whoosh-soft' }] }, opts);
-  assert.deepEqual(problems, []);
+test('accepts a style cue name or its asset id as a sound', () => {
+  assert.deepEqual(validatePlan({ sfx: [{ at: 5, sound: 'whoosh' }] }, opts), []);
+  assert.deepEqual(validatePlan({ sfx: [{ at: 5, sound: 'sfx/whoosh' }] }, opts), []);
 });
 
 test('parsePlan throws a plain error on bad JSON', () => {

@@ -100,9 +100,10 @@ const has = (list, id) => {
  * @param {Object} [opts.catalog] - { templates, visuals, sfx } ids available to reference
  * @returns {string[]} problems — empty means the plan is good to build
  */
-export function validatePlan(rawPlan, { duration = null, style = null, catalog = null } = {}) {
+export function validatePlan(rawPlan, { duration = null, style = null, catalog = null, hookSeconds = null } = {}) {
   const problems = [];
   const s = style ?? loadStyle();
+  const hookKeep = isNum(hookSeconds) ? hookSeconds : (s?.doctrine?.hook?.keepFaceSeconds ?? 0);
 
   if (!rawPlan || typeof rawPlan !== 'object' || Array.isArray(rawPlan)) {
     return ['plan must be an object'];
@@ -155,6 +156,18 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
         problems.push(`${at}.end (${o.end}s) is past the end of the video (${duration}s)`);
       }
       placed.push({ i, start: o.start, end: o.end });
+
+      // Doctrine: the hook always shows the speaker. No takeover (full/center)
+      // before the first sentence lands; a split (left/right) keeps the face on.
+      if (hookKeep > 0 && o.start < hookKeep) {
+        const overlayFrame = o.kind === 'graphic'
+          ? catalog?.templateIndex?.[o.name]?.frame
+          : (o.frame ?? DEFAULT_VISUAL_FRAME);
+        const overlayMode = overlayFrame ? s?.frames?.[overlayFrame]?.mode : null;
+        if (overlayMode === 'takeover') {
+          problems.push(`${at} takes over the screen at ${o.start}s — the first ${hookKeep}s always show you talking to camera, never a b-roll (a split frame is fine)`);
+        }
+      }
     }
 
     if (o.kind === 'graphic') {
@@ -225,7 +238,10 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
   }
 
   // ---- sfx -----------------------------------------------------------------
-  const cueNames = Object.values(s?.sfx?.cues ?? {});
+  // A sound may be named by its cue name (`whoosh`), by the cue's asset id, or
+  // by a library id. The plan uses cue names; the other two keep older plans valid.
+  const cueNames = Object.keys(s?.sfx?.cues ?? {});
+  const cueIds = Object.values(s?.sfx?.cues ?? {});
   plan.sfx.forEach((x, i) => {
     const at = `sfx[${i}]`;
     if (!x || typeof x !== 'object') { problems.push(`${at} must be an object`); return; }
@@ -235,7 +251,7 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
     }
     if (typeof x.sound !== 'string' || !x.sound.trim()) {
       problems.push(`${at}.sound must be a sound id`);
-    } else if (!cueNames.includes(x.sound) && !has(catalog?.sfx, x.sound)) {
+    } else if (!cueNames.includes(x.sound) && !cueIds.includes(x.sound) && !has(catalog?.sfx, x.sound)) {
       problems.push(`${at}.sound "${x.sound}" is not in the library`);
     }
   });

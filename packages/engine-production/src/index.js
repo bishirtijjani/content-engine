@@ -37,9 +37,10 @@ import {
 } from '@content-os/core';
 import { buildComposition } from './assemble.mjs';
 import { mixSfx } from './mix.mjs';
-import { validatePlan, parsePlan, summarizePlan } from './plan.mjs';
+import { validatePlan, parsePlan, summarizePlan, emptyPlan } from './plan.mjs';
 import { buildMenu } from './menu.mjs';
 import { newPlan as makePlan } from './plan-builder.mjs';
+import { buildScriptWords } from './script-captions.mjs';
 import { loadStyle, LEXICON_PATH, PACKAGE_ROOT } from './style.mjs';
 import {
   loadCatalog,
@@ -63,13 +64,15 @@ const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v']);
 export class ProductionEngine extends BaseEngine {
   static NAME = 'production';
   static OWNED_STATES = ['shot', 'editing'];
-  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_plan', 'preview', 'edit', 'make_short', 'request_review', 'resubmit', 'schedule'];
+  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_plan', 'review_plan', 'plan_board', 'preview', 'edit', 'make_short', 'request_review', 'resubmit', 'schedule'];
 
   static ACTION_METHODS = {
     process_footage: 'processFootage',
     list_footage: 'listFootage',
     menu: 'menu',
     save_plan: 'savePlan',
+    review_plan: 'reviewPlan',
+    plan_board: 'planBoard',
     preview: 'preview',
     edit: 'edit',
     make_short: 'makeShort',
@@ -247,6 +250,97 @@ export class ProductionEngine extends BaseEngine {
   }
 
   // =========================================================================
+  // REVIEW PLAN — the storyboard gate: the human sees the board before a render
+  // =========================================================================
+
+  /**
+   * Ask the human to review the board before any render. Returns the board the
+   * agent presents in chat (one line per overlay + the emphasis + the zooms) and
+   * opens a `plan_review` gate. preview() and edit() refuse until that gate is
+   * approved — a render is expensive, a look at the board is not.
+   */
+  reviewPlan({ targetId = null, note = null, dryRun = false } = {}) {
+    if (!targetId) throw new Error('review_plan requires { targetId }');
+    const item = this._item(targetId);
+    const plan = parsePlan(item.video_plan);
+    if (plan === null) {
+      this.log('review_plan', {
+        targetType: 'content_item', targetId: item.id, status: 'skipped',
+        message: 'no plan written yet — the agent writes the plan first',
+      });
+      return { processed: 0, skipped: 1 };
+    }
+
+    const board = this.planBoard({ targetId });
+    const pending = latestPending(this.db, 'plan_review', 'content_item', item.id);
+    if (pending) {
+      this.log('review_plan', {
+        targetType: 'content_item', targetId: item.id, status: 'skipped',
+        message: `plan_review already waiting on the human (id ${pending.id})`,
+      });
+      return { processed: 0, skipped: 1, board };
+    }
+
+    if (dryRun) {
+      this.log('review_plan', {
+        targetType: 'content_item', targetId: item.id,
+        message: 'would ask the human to review the board (dry run)',
+      });
+      return { processed: 1, skipped: 0, board };
+    }
+
+    requestGate(this.db, 'plan_review', 'content_item', item.id, {
+      requestedBy: `engine:${this.name}`,
+      note: note ?? 'board ready to review before a render',
+    });
+    this.log('review_plan', {
+      targetType: 'content_item', targetId: item.id, message: 'asked the human to review the board',
+    });
+    return { processed: 1, skipped: 0, board };
+  }
+
+  /** The board: a beat-by-beat read of the saved plan, for the chat. */
+  planBoard({ targetId = null } = {}) {
+    if (!targetId) throw new Error('plan_board requires { targetId }');
+    const item = this._item(targetId);
+    const plan = parsePlan(item.video_plan) ?? emptyPlan();
+    const catalog = loadCatalog();
+    const templateIndex = validationCatalog(catalog).templateIndex;
+
+    const overlays = (plan.overlays ?? []).map((o) => {
+      const frame = o.kind === 'graphic' ? templateIndex?.[o.name]?.frame : (o.frame || 'full');
+      return {
+        start: o.start,
+        end: o.end,
+        kind: o.kind,
+        name: o.name ?? null,
+        frame: frame ?? null,
+        fields: o.fields ?? null,
+        file: o.file ?? o.asset ?? null,
+        why: o.why,
+      };
+    });
+    const approved = this._planReviewApproved(item.id);
+    return {
+      targetId: item.id,
+      emphasis: plan.captions?.emphasis ?? [],
+      overlays,
+      zooms: plan.zooms ?? [],
+      sfx: plan.sfx ?? [],
+      approved,
+    };
+  }
+
+  /** True when the latest plan_review gate for the item is approved. */
+  _planReviewApproved(itemId) {
+    const row = this.db.prepare(
+      "SELECT status FROM gates WHERE gate_type = 'plan_review' AND target_type = 'content_item' " +
+      'AND target_id = ? ORDER BY id DESC LIMIT 1'
+    ).get(itemId);
+    return row !== undefined && row.status === 'approved';
+  }
+
+  // =========================================================================
   // PREVIEW — a fast, low-res render while the agent iterates
   // =========================================================================
 
@@ -284,6 +378,14 @@ export class ProductionEngine extends BaseEngine {
     if (problems.length) {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `plan failed the style check: ${problems.join(' | ')}` });
       return { processed: 0, skipped: 1, problems };
+    }
+
+    if (!this._planReviewApproved(item.id)) {
+      this.log('preview', {
+        targetType: 'content_item', targetId: item.id, status: 'skipped',
+        message: 'plan not reviewed yet — show the board in chat and open a plan_review gate first',
+      });
+      return { processed: 0, skipped: 1, needsPlanReview: true, board: this.planBoard({ targetId: item.id }) };
     }
 
     const dims = this._renderDims(style, 'preview', probe);
@@ -365,6 +467,14 @@ export class ProductionEngine extends BaseEngine {
         message: `plan failed the style check: ${problems.join(' | ')}`,
       });
       return { processed: 0, skipped: 1, assets: 0, problems };
+    }
+
+    if (!this._planReviewApproved(item.id)) {
+      this.log('edit', {
+        targetType: 'content_item', targetId: item.id, status: 'skipped',
+        message: 'plan not reviewed yet — show the board in chat and open a plan_review gate first',
+      });
+      return { processed: 0, skipped: 1, assets: 0, needsPlanReview: true, board: this.planBoard({ targetId: item.id }) };
     }
 
     const summary = summarizePlan(plan);
@@ -855,9 +965,34 @@ export class ProductionEngine extends BaseEngine {
     return { width, height, fps: cfg.fps ?? 30 };
   }
 
+  /**
+   * The caption clock for a video. Prefer the cleaner's alignment sidecar
+   * (`<name>.align.json`, produced from the aligned audio) when it exists and is
+   * healthy; otherwise use the transcript the cleaner wrote. Both come from the
+   * same aligned audio, so the sidecar is a guarantee of provenance, not a
+   * different clock. Returns { words, source }.
+   */
+  _captionClock(compositionDir, videoPath, asrWords) {
+    const alignPath = videoPath.replace(/\.[^.]+$/, '.align.json');
+    if (existsSync(alignPath) && statSync(alignPath).size > 0) {
+      try {
+        const a = JSON.parse(readFileSync(alignPath, 'utf8'));
+        // ok + tiny drift means the alignment is trustworthy; the word timings in
+        // the transcript already live on this clock.
+        if (a && a.ok) return { words: asrWords, source: `align:${path.basename(alignPath)}` };
+      } catch {
+        // unreadable sidecar — fall through to the transcript
+      }
+    }
+    return { words: asrWords, source: 'transcript' };
+  }
+
   _buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir, mode = 'final' }) {
     const mediaSrc = this._sourceInto(compositionDir, videoPath);
-    const words = this._transcriptFor(compositionDir, videoPath);
+    const asrWords = this._transcriptFor(compositionDir, videoPath);
+    const clock = this._captionClock(compositionDir, videoPath, asrWords);
+    const scriptText = this._scriptText(item);
+    const words = scriptText ? buildScriptWords(scriptText, clock.words) : clock.words;
     const dims = this._renderDims(style, mode, probe);
     const { html, overlayCount } = buildComposition({
       words,
@@ -867,12 +1002,28 @@ export class ProductionEngine extends BaseEngine {
       duration,
       style,
       lexiconPath: LEXICON_PATH,
+      emphasis: plan.captions?.emphasis,
       plan,
       resolveVisual: this._copyVisuals(plan.overlays, compositionDir, catalog),
       audioOnly: probe.audioOnly,
       fps: dims.fps,
     });
     return { html, overlayCount };
+  }
+
+  /** The final spoken script text for captions, or null when there is none. */
+  _scriptText(item) {
+    const raw = item?.script;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.script === 'string' && parsed.script.trim()) return parsed.script;
+      if (typeof parsed === 'string' && parsed.trim()) return parsed;
+    } catch {
+      // not JSON — treat as plain text below
+      return raw;
+    }
+    return null;
   }
 
   /** Shift a plan's timings into a trimmed segment's timeline. */
@@ -935,6 +1086,15 @@ export class ProductionEngine extends BaseEngine {
     if (r.lowMemoryMode === false) args.push('--no-low-memory-mode');
     else if (r.lowMemoryMode === true) args.push('--low-memory-mode');
     if (r.protocolTimeoutMs != null) args.push('--protocol-timeout', String(r.protocolTimeoutMs));
+
+    // Let a render survive a machine sleep (S3 freezes and resumes processes; the
+    // kill comes from timeouts firing on wake, not from the sleep). Raise the
+    // browser-side timeouts too so probe/calibration sessions do not expire.
+    if (r.protocolTimeoutMs != null) {
+      env.PRODUCER_PUPPETEER_PROTOCOL_TIMEOUT_MS = String(r.protocolTimeoutMs);
+      env.PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS = String(r.protocolTimeoutMs);
+      env.PRODUCER_PLAYER_READY_TIMEOUT_MS = String(r.protocolTimeoutMs);
+    }
 
     const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: r.timeoutMs ?? 1800000, env });
 

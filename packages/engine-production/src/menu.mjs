@@ -17,5 +17,6 @@ export function buildMenu({ style = null, catalog = null } = {}) {
     visuals: (cat.visuals ?? []).map((v) => ({ file: v.file, what: v.description })),
     sfx: (cat.sfx ?? []).map((x) => ({ id: x.id, what: x.description })),
     cues: Object.keys(s.sfx?.cues ?? {}),
+    doctrine: s.doctrine ?? null,
   };
 }
