@@ -17,6 +17,10 @@ const CATALOG = {
     'stat-callout': { fields: ['value', 'label'], frame: 'center' },
     'lower-third': { fields: ['name', 'role'], frame: 'left' },
   },
+  diagrams: ['flow'],
+  diagramIndex: {
+    flow: { frame: 'full', steps: { min: 2, max: 5 }, fields: ['title', 'steps', 'active'] },
+  },
   visuals: ['visuals/dashboard', 'visuals/demo-clip'],
   sfx: ['sfx/whoosh', 'sfx/ding'],
 };
@@ -144,6 +148,59 @@ test('rejects a field the graphic does not take', () => {
     { overlays: [{ kind: 'graphic', name: 'stat-callout', start: 1, end: 3, why: 'show it', fields: { value: '8', nope: 'x' } }] }, opts
   );
   assert.ok(problems.some((p) => /does not take/.test(p)));
+});
+
+test('accepts a valid flow diagram', () => {
+  const plan = {
+    overlays: [{
+      kind: 'diagram', name: 'flow', start: 8, end: 13, why: 'show the loop',
+      spec: {
+        title: 'The loop',
+        steps: [
+          { label: 'Lead in', icon: 'user' },
+          { label: 'Send it', icon: 'send' },
+          { label: 'Log it', icon: 'check' },
+        ],
+      },
+    }],
+  };
+  assert.deepEqual(validatePlan(plan, opts), []);
+});
+
+test('rejects an unknown diagram layout', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'diagram', name: 'ghost', start: 8, end: 13, why: 'show it', spec: { steps: [{ label: 'A' }, { label: 'B' }] } }] }, opts
+  );
+  assert.ok(problems.some((p) => /not in the library/.test(p)));
+});
+
+test('rejects a diagram with too many steps', () => {
+  const steps = Array.from({ length: 6 }, (_, i) => ({ label: `Step ${i}` }));
+  const problems = validatePlan(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 10, end: 20, why: 'show it', spec: { steps } }] }, opts
+  );
+  assert.ok(problems.some((p) => /at most 5 steps/.test(p)));
+});
+
+test('rejects a diagram icon that is not in the set', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 10, end: 20, why: 'show it', spec: { steps: [{ label: 'A', icon: 'rocket' }, { label: 'B' }] } }] }, opts
+  );
+  assert.ok(problems.some((p) => /not in the icon set/.test(p)));
+});
+
+test('rejects a diagram too short to play', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 8, end: 9.5, why: 'show it', spec: { steps: [{ label: 'A' }, { label: 'B' }, { label: 'C' }, { label: 'D' }] } }] }, opts
+  );
+  assert.ok(problems.some((p) => /needs .* to play/.test(p)));
+});
+
+test('refuses a takeover diagram during the hook', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 1, end: 8, why: 'show it', spec: { steps: [{ label: 'A' }, { label: 'B' }] } }] }, opts
+  );
+  assert.ok(problems.some((p) => /takes over the screen.*talking to camera/.test(p)));
 });
 
 test('rejects overlapping overlays', () => {

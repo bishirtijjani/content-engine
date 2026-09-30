@@ -19,6 +19,9 @@
 import { loadStyle, loadBackdrop } from './style.mjs';
 import { buildCaptionLayer } from './build-captions.mjs';
 import { renderTemplate } from './templates.mjs';
+import { renderDiagram } from './diagrams/render.mjs';
+import { getLayout } from './diagrams/registry.mjs';
+import { deriveTheme } from './diagrams/theme.mjs';
 
 const r3 = (n) => Math.round(n * 1000) / 1000;
 const pct = (n) => `${r3(n * 100)}%`;
@@ -50,12 +53,13 @@ function frameStyle(f) {
  * Render overlay clips and their CSS. Returns split tweens so the caller can
  * inset the video during split-mode overlays.
  */
-function renderOverlays(overlays, { frames, templatesDir, resolveVisual }) {
+function renderOverlays(overlays, { frames, templatesDir, resolveVisual, width, height, theme }) {
   const cssParts = [];
   const seen = new Set();
   const clips = [];
   const splits = [];
   const takeovers = [];
+  const js = [];
 
   overlays.forEach((o, i) => {
     const id = `ov-${i + 1}`;
@@ -75,6 +79,22 @@ function renderOverlays(overlays, { frames, templatesDir, resolveVisual }) {
       frameName = t.frame;
       if (t.css && !seen.has(t.name)) { seen.add(t.name); cssParts.push(t.css); }
       inner = `<div class="ov-graphic">${t.html}</div>`;
+    } else if (o.kind === 'diagram') {
+      const layout = getLayout(o.name);
+      if (!layout) return; // unknown layout — validatePlan already refuses these
+      frameName = layout.frame;
+      const diagramFrame = frames[frameName];
+      if (!diagramFrame) return;
+      // Compose against the ACTUAL frame box in pixels, so the same spec draws
+      // correctly on a 16:9 long video and a 9:16 short.
+      const box = { w: diagramFrame.w * width, h: diagramFrame.h * height };
+      const rendered = renderDiagram({
+        name: o.name, spec: o.spec, box, ovId: id, theme, timing: { start, dur },
+      });
+      if (!rendered) return; // invalid spec — validatePlan already refused it
+      if (rendered.css && !seen.has('__diagram__')) { seen.add('__diagram__'); cssParts.push(rendered.css); }
+      inner = `<div class="ov-diagram">${rendered.svg}</div>`;
+      for (const line of rendered.js ?? []) js.push(line);
     } else {
       const key = o.file || o.asset;
       const src = resolveVisual ? resolveVisual(key) : key;
@@ -97,7 +117,7 @@ function renderOverlays(overlays, { frames, templatesDir, resolveVisual }) {
     );
   });
 
-  return { html: clips.join('\n'), css: cssParts.join('\n'), splits, takeovers };
+  return { html: clips.join('\n'), css: cssParts.join('\n'), splits, takeovers, js };
 }
 
 /** GSAP tweens for the camera pushes. */
@@ -188,11 +208,13 @@ export function buildComposition({
   const overlays = Array.isArray(plan?.overlays) ? plan.overlays : [];
   const zooms = Array.isArray(plan?.zooms) ? plan.zooms : [];
 
-  const overlay = renderOverlays(overlays, { frames, templatesDir, resolveVisual });
+  const overlay = renderOverlays(overlays, {
+    frames, templatesDir, resolveVisual, width, height, theme: deriveTheme(s),
+  });
   const zoomJs = renderZoomScript(zooms, s);
   const splitJs = renderSplitScript(overlay.splits);
   const hideJs = renderHideScript(overlay.takeovers);
-  const timelineJs = [splitJs, hideJs, zoomJs].filter(Boolean).join('\n');
+  const timelineJs = [splitJs, hideJs, zoomJs, ...(overlay.js ?? [])].filter(Boolean).join('\n');
   const grade = gradeFilter(s);
 
   const brandVars = `      :root {
@@ -227,6 +249,7 @@ ${layer.css}
       .frame { position: absolute; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
       .ov-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: calc(var(--u) * 18px); box-shadow: 0 calc(var(--u) * 16px) calc(var(--u) * 44px) rgba(0,0,0,.35); }
       .ov-graphic { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      .ov-diagram { width: 100%; height: 100%; display: block; }
       /* captions sit above everything; the band is a keep-out for visuals */
       .cap { z-index: 5; }
 ${overlay.css ? overlay.css + '\n' : ''}    </style>

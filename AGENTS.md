@@ -213,8 +213,9 @@ The engine owns these; HyperFrames never decides for us.
 ### Plan contract
 
 `content_items.video_plan` is structured JSON. Every field is optional; an
-empty plan is a plain captioned video. Two overlay kinds: `visual` (a file you
-supply) and `graphic` (a template we draw). Every overlay carries a `why`.
+empty plan is a plain captioned video. Three overlay kinds: `visual` (a file
+you supply), `graphic` (a template we draw), and `diagram` (a composed SVG
+layout). Every overlay carries a `why`.
 
 ```json
 { "captions": { "emphasis": ["automated", "30 seconds"] },
@@ -290,7 +291,7 @@ each narration beat answer these in order:
    materially improve the communication, stay on the face.
 2. What type? real screen/UI or filmed action → `visual`; numbers, claims,
    lists, takeaways, quotes, CTA, title → a `graphic` card; relationships,
-   processes, architecture → a `graphic` diagram; a supporting note or button →
+   processes, architecture → a `diagram`; a supporting note or button →
    a `graphic` split card.
 3. Full or split? A graphic's frame comes from its template. A visual is `full`
    when the viewer must inspect or read it, `left`/`right` when it only supports
@@ -324,11 +325,22 @@ look; every future video follows. `brand.colors.bg` is the fallback color.
 - `templates/` — on-brand graphics, drawn once and reused. The agent picks a
   name and fills the fields; it never rewrites the graphic.
   - cards: `stat-callout`, `key-point`, `text-box`, `quote-card`, `title-card`, `cta-card`
-  - lists: `step-list`, `checklist`, `timeline`
+  - lists: `step-list`, `checklist`
   - prompts: `comment-prompt`, `link-prompt`, `callout`
   - buttons: `subscribe-button`, `follow-button`
-  - diagrams: `flow`, `before-after`, `comparison`
   - people: `lower-third`
+- `src/diagrams/` — composed SVG diagrams (a node/connector/label/icon layer),
+  not static cards. The agent names a layout and passes a `spec`:
+  `{ kind: 'diagram', name: 'flow', spec: { title?, steps: [{ label, icon? }], active? }, why, start, end }`.
+  A diagram draws against the real frame box, so the same spec lays out
+  horizontally on a 16:9 long video and vertically on a 9:16 short, and it
+  animates (enter → staggered reveal → connector draw → active ring → exit).
+  Icons come from Tabler (MIT) — geometry is inlined at build time into
+  `src/diagrams/icons.generated.mjs` by `tools/build-icons.mjs`; runtime reads a
+  plain object, no dependency. `src/diagrams/icons.custom.mjs` is the empty
+  fallback for a concept Tabler does not cover. Rebuild with
+  `npm --workspace @content-os/engine-production run icons`.
+  Layouts so far: `flow`. Builder: `engine.newPlan().diagram({ at, name, spec, why })`.
 - `assets/sfx/` — short sounds. These ARE reusable. Drop `.wav` files there and
   run `npm --workspace @content-os/engine-production run catalog` once; the plan
   refers to them by cue name (`whoosh`, `click`, ...) or id.
@@ -415,6 +427,7 @@ npm test                                  # 167 tests — must stay green
 npm run seed                              # brand + script + idea frameworks
 npm run clean -- data/vid1                # clean a recording (propose; --apply to cut)
 npm --workspace @content-os/engine-production run catalog   # rebuild assets/catalog.json
+npm --workspace @content-os/engine-production run icons     # rebuild diagrams/icons.generated.mjs (Tabler, MIT)
 node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <id>   # render script
 node --disable-warning=ExperimentalWarning scripts/reset-content.mjs       # purge placeholder content
 node --disable-warning=ExperimentalWarning scripts/cleanup-db.mjs          # wipe all items/gates/history

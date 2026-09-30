@@ -19,16 +19,16 @@ const plan = engine.newPlan()
     fields: { text: '01 · Marketing' } })
   .graphic({ at: [26.6, 29.8], name: 'callout', why: 'mark area two',
     fields: { text: '02 · Sales' } })
-  .graphic({ at: [32.5, 37.5], name: 'flow', why: 'make the sales automation loop concrete',
-    fields: { step1: 'Lead in', step2: 'Qualify', step3: 'Follow up' } })
+  .diagram({ at: [32.5, 37.5], name: 'flow', why: 'make the sales automation loop concrete',
+    spec: { steps: [{ label: 'Lead in', icon: 'user' }, { label: 'Qualify', icon: 'check' }, { label: 'Follow up', icon: 'send' }] } })
   .graphic({ at: [44.8, 48.0], name: 'callout', why: 'mark area three',
     fields: { text: '03 · Operations' } })
   .graphic({ at: [51.0, 54.2], name: 'callout', why: 'mark area four',
     fields: { text: '04 · Customer support' } })
   .graphic({ at: [70.2, 73.4], name: 'callout', why: 'mark area five',
     fields: { text: '05 · Finance' } })
-  .graphic({ at: [76.3, 81.5], name: 'flow', why: 'show the recurring invoice job',
-    fields: { step1: 'Invoice created', step2: 'Generated', step3: 'Sent weekly' } })
+  .diagram({ at: [76.3, 81.5], name: 'flow', why: 'show the recurring invoice job',
+    spec: { steps: [{ label: 'Invoice created', icon: 'doc' }, { label: 'Generated', icon: 'gear' }, { label: 'Sent weekly', icon: 'send' }] } })
   .graphic({ at: [82.5, 85.7], name: 'callout', why: 'mark area six',
     fields: { text: '06 · Product' } })
   .graphic({ at: [95.7, 98.9], name: 'callout', why: 'mark area seven',

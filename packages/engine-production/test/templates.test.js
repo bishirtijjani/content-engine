@@ -7,7 +7,7 @@ test('listTemplates finds the templates', () => {
   const names = listTemplates().map((t) => t.name);
   for (const n of ['stat-callout', 'lower-third', 'quote-card', 'cta-card', 'step-list',
     'text-box', 'key-point', 'checklist', 'callout', 'subscribe-button', 'follow-button',
-    'comment-prompt', 'link-prompt', 'flow', 'before-after', 'comparison', 'timeline', 'title-card']) {
+    'comment-prompt', 'link-prompt', 'title-card']) {
     assert.ok(names.includes(n), `missing template: ${n}`);
   }
 });

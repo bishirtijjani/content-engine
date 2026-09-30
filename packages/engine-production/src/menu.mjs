@@ -7,6 +7,7 @@
 import { loadStyle } from './style.mjs';
 import { listTemplates } from './templates.mjs';
 import { loadCatalog } from './library.mjs';
+import { listDiagrams } from './diagrams/registry.mjs';
 
 export function buildMenu({ style = null, catalog = null } = {}) {
   const s = style ?? loadStyle();
@@ -14,6 +15,7 @@ export function buildMenu({ style = null, catalog = null } = {}) {
   return {
     frames: Object.entries(s.frames ?? {}).map(([name, f]) => ({ name, mode: f.mode, what: f.what })),
     templates: listTemplates().map((t) => ({ name: t.name, what: t.description, frame: t.frame, fields: t.fields })),
+    diagrams: listDiagrams(),
     visuals: (cat.visuals ?? []).map((v) => ({ file: v.file, what: v.description })),
     sfx: (cat.sfx ?? []).map((x) => ({ id: x.id, what: x.description })),
     cues: Object.keys(s.sfx?.cues ?? {}),

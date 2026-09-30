@@ -26,10 +26,13 @@
 // A `visual` points at a file you drop in for that video (`file`), so each video
 // carries its own pictures. A reusable id from the library (`asset`) still works.
 import { loadStyle } from './style.mjs';
+import { getLayout } from './diagrams/registry.mjs';
+import { validateDiagram } from './diagrams/render.mjs';
 
-// Two kinds: a `visual` is a file you supply (screenshot, screen recording,
-// your own video); a `graphic` is a template we draw (card, diagram).
-export const OVERLAY_KINDS = ['visual', 'graphic'];
+// Three kinds: a `visual` is a file you supply (screenshot, screen recording,
+// your own video); a `graphic` is a template we draw (card); a `diagram` is a
+// composed SVG layout (flow, ...).
+export const OVERLAY_KINDS = ['visual', 'graphic', 'diagram'];
 export const MIN_OVERLAY_SECONDS = 0.6;
 
 // The four slots every overlay snaps into. A visual picks one; a graphic gets
@@ -160,9 +163,11 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
       // Doctrine: the hook always shows the speaker. No takeover (full/center)
       // before the first sentence lands; a split (left/right) keeps the face on.
       if (hookKeep > 0 && o.start < hookKeep) {
-        const overlayFrame = o.kind === 'graphic'
-          ? catalog?.templateIndex?.[o.name]?.frame
-          : (o.frame ?? DEFAULT_VISUAL_FRAME);
+        let overlayFrame;
+        if (o.kind === 'graphic') overlayFrame = catalog?.templateIndex?.[o.name]?.frame;
+        else if (o.kind === 'diagram') {
+          overlayFrame = catalog?.diagramIndex?.[o.name]?.frame ?? getLayout(o.name)?.frame;
+        } else overlayFrame = o.frame ?? DEFAULT_VISUAL_FRAME;
         const overlayMode = overlayFrame ? s?.frames?.[overlayFrame]?.mode : null;
         if (overlayMode === 'takeover') {
           problems.push(`${at} takes over the screen at ${o.start}s — the first ${hookKeep}s always show you talking to camera, never a b-roll (a split frame is fine)`);
@@ -199,6 +204,18 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
       const frame = o.frame ?? DEFAULT_VISUAL_FRAME;
       if (!validFrames.includes(frame)) {
         problems.push(`${at}.frame must be one of ${validFrames.join(', ')}`);
+      }
+    } else if (o.kind === 'diagram') {
+      if (typeof o.name !== 'string' || !o.name.trim()) {
+        problems.push(`${at} needs a diagram name`);
+      } else if (!has(catalog?.diagrams, o.name)) {
+        problems.push(`${at} uses diagram "${o.name}" which is not in the library`);
+      } else {
+        const layout = catalog?.diagramIndex?.[o.name]?.descriptor ?? getLayout(o.name);
+        const overDur = isNum(o.start) && isNum(o.end) ? o.end - o.start : null;
+        for (const p of validateDiagram(o.spec, layout, { duration: overDur })) {
+          problems.push(`${at}: ${p}`);
+        }
       }
     }
   });

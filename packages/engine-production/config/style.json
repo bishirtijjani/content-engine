@@ -21,7 +21,7 @@
         { "what": "real screen or UI", "use": "visual", "frame": "full" },
         { "what": "real action or subject you filmed", "use": "visual", "frame": "full" },
         { "what": "number, claim, takeaway, quote, CTA, title", "use": "graphic (center cards)", "frame": "center" },
-        { "what": "relationship, process, architecture, comparison", "use": "graphic (flow, timeline, before-after, comparison)", "frame": "full" },
+        { "what": "relationship, process, architecture, comparison", "use": "diagram (flow, pipeline, architecture, timeline, comparison)", "frame": "full" },
         { "what": "short supporting note, attribution, button", "use": "graphic (callout, lower-third, follow/subscribe)", "frame": "left or right" }
       ],
       "frame": "A graphic's frame comes from its template — never override it. A visual takes 'full' when they must inspect or read it, 'left'/'right' when it only supports what is said.",

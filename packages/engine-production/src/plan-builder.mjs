@@ -14,9 +14,14 @@ export function newPlan() {
       }
       return builder;
     },
-    /** A drawn graphic (button, text box, diagram). `at` is [start, end] in seconds. */
+    /** A drawn graphic (button, text box, card). `at` is [start, end] in seconds. */
     graphic({ at, name, fields, why } = {}) {
       plan.overlays.push({ kind: 'graphic', name, fields, why, start: at?.[0], end: at?.[1] });
+      return builder;
+    },
+    /** A composed diagram (flow, ...). `at` is [start, end] in seconds. */
+    diagram({ at, name, spec, why } = {}) {
+      plan.overlays.push({ kind: 'diagram', name, spec, why, start: at?.[0], end: at?.[1] });
       return builder;
     },
     /** A picture or clip for this video. `at` is [start, end] in seconds. */

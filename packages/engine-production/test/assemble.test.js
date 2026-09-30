@@ -45,11 +45,36 @@ test('inlines the designed backdrop as the base layer', () => {
 
 test('a take-over overlay hides the video so the backdrop shows', () => {
   const { html } = build(
-    { overlays: [{ kind: 'graphic', name: 'flow', start: 0, end: 2, why: 'show the process', fields: { step1: 'a', step2: 'b', step3: 'c' } }] }
+    { overlays: [{ kind: 'graphic', name: 'stat-callout', start: 0, end: 2, why: 'show the number', fields: { value: '8', label: 'hours' } }] }
   );
   assert.ok(html.includes('ov-takeover'));
   assert.ok(html.includes("tl.set('#a-roll', { opacity: 0 }"));
   assert.ok(html.includes("tl.set('#a-roll', { opacity: 1 }"));
+});
+
+test('renders an animated flow diagram as SVG in a take-over clip', () => {
+  const { html, overlayCount } = build(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 0, end: 2.4, why: 'show the process',
+      spec: { title: 'The loop', steps: [{ label: 'Lead in', icon: 'user' }, { label: 'Send it', icon: 'send' }] } }] }
+  );
+  assert.equal(overlayCount, 1);
+  assert.ok(html.includes('ov-takeover'));
+  assert.ok(html.includes('ov-diagram'));
+  assert.ok(html.includes('dg-svg'));
+  assert.ok(html.includes('stroke-dasharray'));
+  assert.ok(html.includes('dg-arrow'));
+  assert.ok(html.includes('strokeDashoffset'));
+  assert.ok(html.includes("tl.to('#ov-1 .dg-root'"));
+});
+
+test('composes a diagram against a landscape frame box', () => {
+  const { html } = build(
+    { overlays: [{ kind: 'diagram', name: 'flow', start: 0, end: 2.4, why: 'show the process',
+      spec: { steps: [{ label: 'One' }, { label: 'Two' }] } }] },
+    { width: 1280, height: 720 }
+  );
+  assert.ok(html.includes('dg-node-0'));
+  assert.ok(html.includes('dg-node-1'));
 });
 
 test('omits the video element for audio-only sources', () => {

@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PACKAGE_ROOT } from './style.mjs';
 import { listTemplates } from './templates.mjs';
+import { listDiagrams, getLayout } from './diagrams/registry.mjs';
 
 export const ASSETS_DIR = path.join(PACKAGE_ROOT, 'assets');
 export const CATALOG_PATH = path.join(ASSETS_DIR, 'catalog.json');
@@ -52,9 +53,14 @@ export function resolveSfxPath(id, catalog = loadCatalog(), assetsDir = ASSETS_D
 /** What validatePlan() needs: the ids that may be referenced, plus template details. */
 export function validationCatalog(catalog = loadCatalog()) {
   const templates = listTemplates();
+  const diagrams = listDiagrams();
   return {
     templates: templates.map((t) => t.name),
     templateIndex: Object.fromEntries(templates.map((t) => [t.name, { fields: t.fields, frame: t.frame }])),
+    diagrams: diagrams.map((d) => d.name),
+    diagramIndex: Object.fromEntries(
+      diagrams.map((d) => [d.name, { frame: d.frame, steps: d.steps, fields: d.fields, descriptor: getLayout(d.name) }])
+    ),
     visuals: visualIds(catalog),
     sfx: sfxIds(catalog),
   };

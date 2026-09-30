@@ -305,10 +305,16 @@ export class ProductionEngine extends BaseEngine {
     const item = this._item(targetId);
     const plan = parsePlan(item.video_plan) ?? emptyPlan();
     const catalog = loadCatalog();
-    const templateIndex = validationCatalog(catalog).templateIndex;
+    const vcat = validationCatalog(catalog);
+    const templateIndex = vcat.templateIndex;
+    const diagramIndex = vcat.diagramIndex;
 
     const overlays = (plan.overlays ?? []).map((o) => {
-      const frame = o.kind === 'graphic' ? templateIndex?.[o.name]?.frame : (o.frame || 'full');
+      const frame = o.kind === 'graphic'
+        ? templateIndex?.[o.name]?.frame
+        : o.kind === 'diagram'
+          ? diagramIndex?.[o.name]?.frame
+          : (o.frame || 'full');
       return {
         start: o.start,
         end: o.end,
@@ -316,6 +322,7 @@ export class ProductionEngine extends BaseEngine {
         name: o.name ?? null,
         frame: frame ?? null,
         fields: o.fields ?? null,
+        spec: o.spec ?? null,
         file: o.file ?? o.asset ?? null,
         why: o.why,
       };
