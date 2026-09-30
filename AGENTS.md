@@ -340,7 +340,9 @@ look; every future video follows. `brand.colors.bg` is the fallback color.
   plain object, no dependency. `src/diagrams/icons.custom.mjs` is the empty
   fallback for a concept Tabler does not cover. Rebuild with
   `npm --workspace @content-os/engine-production run icons`.
-  Layouts so far: `flow`. Builder: `engine.newPlan().diagram({ at, name, spec, why })`.
+  Layouts: `flow`, `pipeline`, `cycle`, `timeline`, `before-after`, `comparison`,
+  `decision`, `hierarchy`, `architecture`, `relationship`, `layers`, `funnel`.
+  Builder: `engine.newPlan().diagram({ at, name, spec, why })`.
 - `assets/sfx/` — short sounds. These ARE reusable. Drop `.wav` files there and
   run `npm --workspace @content-os/engine-production run catalog` once; the plan
   refers to them by cue name (`whoosh`, `click`, ...) or id.

@@ -327,7 +327,7 @@ const plan = engine.newPlan()
 engine.savePlan({ targetId, plan });   // validates against the menu, then stores
 ```
 
-14 templates ship: cards (`stat-callout`, `key-point`, `text-box`, `quote-card`, `title-card`, `cta-card`), lists (`step-list`, `checklist`), prompts (`comment-prompt`, `link-prompt`, `callout`), buttons (`subscribe-button`, `follow-button`), people (`lower-third`). Diagrams are a separate, composed SVG system (`src/diagrams/`), starting with `flow`; the builder is `.diagram({ at, name, spec, why })`. Diagram icons come from **Tabler** (MIT) — geometry is inlined at build time into `src/diagrams/icons.generated.mjs` (`npm --workspace @content-os/engine-production run icons`), read at runtime with no dependency.
+14 templates ship: cards (`stat-callout`, `key-point`, `text-box`, `quote-card`, `title-card`, `cta-card`), lists (`step-list`, `checklist`), prompts (`comment-prompt`, `link-prompt`, `callout`), buttons (`subscribe-button`, `follow-button`), people (`lower-third`). Diagrams are a separate, composed SVG system (`src/diagrams/`) with 12 layouts (`flow`, `pipeline`, `cycle`, `timeline`, `before-after`, `comparison`, `decision`, `hierarchy`, `architecture`, `relationship`, `layers`, `funnel`); the builder is `.diagram({ at, name, spec, why })`. Diagram icons come from **Tabler** (MIT) — geometry is inlined at build time into `src/diagrams/icons.generated.mjs` (`npm --workspace @content-os/engine-production run icons`), read at runtime with no dependency.
 
 ---
 
@@ -433,7 +433,7 @@ content-os/
     │   ├── tools/clean/          the cleaner CLI (clean.mjs + align.py/place.py/silence.py, lib/cut.mjs, lib/guard.mjs)
     │   ├── assets/sfx/           reusable sounds (+ catalog.json)
     │   ├── backdrop/brand.svg    the designed base layer (grid with depth)
-    │   ├── src/diagrams/         composed SVG diagrams (primitives + layouts, starting with flow)
+    │   ├── src/diagrams/         composed SVG diagrams (12 layouts: flow, pipeline, cycle, timeline, before-after, comparison, decision, hierarchy, architecture, relationship, layers, funnel)
     │   └── templates/            14 on-brand graphics (cards, lists, prompts, buttons, people)
     ├── engine-distribution/      skeleton — adapt → schedule → publish → cross-post
     ├── engine-engagement/        skeleton — monitor → classify → reply → escalate
