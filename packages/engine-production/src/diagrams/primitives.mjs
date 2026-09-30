@@ -63,3 +63,71 @@ export function connector({ x1, y1, x2, y2, cls = 'dg-line', markerId = '' }) {
   const style = `stroke-dasharray:${r3(length)};stroke-dashoffset:${r3(length)}`;
   return { length, markup: `<path class="${cls}" d="${d}"${mark} style="${style}"/>` };
 }
+
+/**
+ * A dashed path from raw `d`. Used by curved connectors, cycle arcs and
+ * branching elbows. Pass `length` (approximate is fine) to arm the draw so the
+ * line can animate itself; the default reads it from `d`'s numbers, which is
+ * close enough for arcs. `markerId` is filled in by render.mjs.
+ */
+export function path({ d, cls = 'dg-line', markerId = '', length = null, dash = true }) {
+  const mark = markerId ? ` marker-end="url(#${markerId})"` : '';
+  const len = length ?? approxLength(d);
+  const style = dash ? ` style="stroke-dasharray:${r3(len)};stroke-dashoffset:${r3(len)}"` : '';
+  return { length: len, markup: `<path class="${cls}" d="${d}"${mark}${style}/>` };
+}
+
+/** Rough polyline length from the numbers in a path `d` (arcs are approximated). */
+export function approxLength(d) {
+  const nums = (String(d).match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  let sum = 0;
+  for (let i = 0; i + 3 < nums.length; i += 2) {
+    sum += Math.hypot(nums[i + 2] - nums[i], nums[i + 3] - nums[i + 1]);
+  }
+  return Math.max(1, sum);
+}
+
+/** A filled or stroked polygon from a list of [x,y] points. */
+export function polygon({ points = [], cls = '' }) {
+  const pts = points.map(([x, y]) => `${r3(x)},${r3(y)}`).join(' ');
+  return `<polygon class="${cls}" points="${pts}"/>`;
+}
+
+/** A circle (marker, node, ring). */
+export function circle({ cx, cy, r, cls = '' }) {
+  return `<circle class="${cls}" cx="${r3(cx)}" cy="${r3(cy)}" r="${r3(r)}"/>`;
+}
+
+/** A plain rule (the time axis, a divider). Not animated unless wrapped. */
+export function line({ x1, y1, x2, y2, cls = 'dg-axis' }) {
+  return `<line class="${cls}" x1="${r3(x1)}" y1="${r3(y1)}" x2="${r3(x2)}" y2="${r3(y2)}"/>`;
+}
+
+/** A short tick crossing a point on an axis. */
+export function tick({ x, y, len = 14, vertical = false, cls = 'dg-tick' }) {
+  return vertical
+    ? line({ x1: x - len, y1: y, x2: x + len, y2: y, cls })
+    : line({ x1: x, y1: y - len, x2: x, y2: y + len, cls });
+}
+
+/**
+ * Wrap a label to at most `maxLines` at a character budget (no DOM measurement).
+ * Shared by the layouts; Flow keeps its own copy.
+ */
+export function wrap(label, maxChars, maxLines = 2) {
+  const words = String(label).trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (!cur || next.length <= maxChars) cur = next;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length > maxLines) lines.splice(maxLines - 1, lines.length - 1, lines.slice(maxLines - 1).join(' '));
+  return lines;
+}
+
