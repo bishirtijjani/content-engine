@@ -230,10 +230,18 @@ layout). Every overlay carries a `why`.
   "sfx":   [ { "at": 12, "sound": "whoosh" } ] }
 ```
 
+A **video** `visual` may select a region of its source with `sourceIn`/`sourceOut`
+(seconds into the clip), independent of where the overlay lands (`start`/`end`).
+At 1x playback the source length must equal the on-screen length; omitted, it
+plays from source 0 for the display duration. Images take no source fields.
+
 `validatePlan()` refuses: wrong length, overlapping overlays, a visual or
 graphic not in the library, a field the graphic does not take, an unknown
 frame, an overlay with no purpose (or a filler purpose), too many zooms, a bad
-zoom scale. Nothing renders if the plan fails.
+zoom scale, or a source length that does not match the on-screen length. The
+engine additionally refuses a visual whose file is not on disk, source fields on
+an image, or a source range past the end of the clip. Nothing renders if the
+plan fails.
 
 ### Frames and modes (the model never sets a size or a position)
 

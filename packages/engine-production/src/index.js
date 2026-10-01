@@ -60,6 +60,7 @@ const RENDERS_DIR = path.join(DATA_DIR, 'renders');
 const TRANSCRIBE_PY = path.join(PACKAGE_ROOT, 'tools', 'transcribe.py');
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v']);
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif']);
 
 export class ProductionEngine extends BaseEngine {
   static NAME = 'production';
@@ -229,7 +230,10 @@ export class ProductionEngine extends BaseEngine {
     const footage = this._primaryFootage(item.id);
     const duration = footage ? this._probe(path.resolve(PROJECT_ROOT, footage.file_path)).duration : null;
 
-    const problems = validatePlan(raw, { duration, style, catalog: validationCatalog(catalog) });
+    const problems = [
+      ...validatePlan(raw, { duration, style, catalog: validationCatalog(catalog) }),
+      ...this._visualMediaProblems(raw, { catalog }),
+    ];
     if (problems.length) {
       this.log('save_plan', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
@@ -324,6 +328,8 @@ export class ProductionEngine extends BaseEngine {
         fields: o.fields ?? null,
         spec: o.spec ?? null,
         file: o.file ?? o.asset ?? null,
+        sourceIn: o.sourceIn ?? null,
+        sourceOut: o.sourceOut ?? null,
         why: o.why,
       };
     });
@@ -381,7 +387,10 @@ export class ProductionEngine extends BaseEngine {
     const probe = this._probe(videoPath);
     const duration = probe.duration ?? item.desired_length_seconds ?? 60;
 
-    const problems = validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) });
+    const problems = [
+      ...validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) }),
+      ...this._visualMediaProblems(plan, { catalog }),
+    ];
     if (problems.length) {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `plan failed the style check: ${problems.join(' | ')}` });
       return { processed: 0, skipped: 1, problems };
@@ -467,7 +476,10 @@ export class ProductionEngine extends BaseEngine {
     const probe = this._probe(videoPath);
     const duration = probe.duration ?? item.desired_length_seconds ?? 60;
 
-    const problems = validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) });
+    const problems = [
+      ...validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) }),
+      ...this._visualMediaProblems(plan, { catalog }),
+    ];
     if (problems.length) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
@@ -867,6 +879,53 @@ export class ProductionEngine extends BaseEngine {
   _visualsDir(videoPath) {
     const base = path.basename(videoPath, path.extname(videoPath));
     return path.join(path.dirname(videoPath), `${base}.visuals`);
+  }
+
+  /**
+   * Refuse visuals the renderer cannot use: a file that is not on disk, source
+   * fields on an image, or a source range past the end of the clip. validatePlan
+   * is pure; this resolves files and probes video, so a bad visual is caught at
+   * save/plan/preview/edit time instead of silently at render time.
+   */
+  _visualMediaProblems(plan, { catalog = null } = {}) {
+    const problems = [];
+    const cat = catalog ?? loadCatalog();
+    const overlays = Array.isArray(plan?.overlays) ? plan.overlays : [];
+    const fps = loadStyle()?.render?.final?.fps ?? 24;
+    const tol = 1 / fps;
+
+    overlays.forEach((o, i) => {
+      if (!o || o.kind !== 'visual') return;
+      const at = `overlays[${i}]`;
+      const file = typeof o.file === 'string' ? o.file.trim() : '';
+      const asset = typeof o.asset === 'string' ? o.asset.trim() : '';
+      const src = file ? this._resolveVisualFile(file) : (asset ? resolveVisualPath(asset, cat) : null);
+      if (!src) {
+        problems.push(`${at} visual not found: ${file || asset || '(unnamed)'}`);
+        return;
+      }
+
+      const hasSource = o.sourceIn !== undefined || o.sourceOut !== undefined;
+      if (IMAGE_EXT.has(path.extname(src).toLowerCase())) {
+        if (hasSource) {
+          problems.push(`${at} sourceIn/sourceOut apply only to video visuals, not images`);
+        }
+        return;
+      }
+
+      // A video: the requested source region must fit inside the real clip.
+      const probe = this._probe(src);
+      if (!probe.duration) return; // ffprobe missing or unreadable — skip the range check
+      const srcIn = Number.isFinite(o.sourceIn) ? o.sourceIn : 0;
+      const srcOut = Number.isFinite(o.sourceOut)
+        ? o.sourceOut
+        : (Number.isFinite(o.start) && Number.isFinite(o.end) ? srcIn + (o.end - o.start) : null);
+      if (srcOut !== null && srcOut > probe.duration + tol) {
+        problems.push(`${at} source range ends at ${srcOut}s but the clip is only ${probe.duration}s`);
+      }
+    });
+
+    return problems;
   }
 
   /** Create the session + recording rows and link them to the item. */

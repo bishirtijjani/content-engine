@@ -25,6 +25,10 @@
 //
 // A `visual` points at a file you drop in for that video (`file`), so each video
 // carries its own pictures. A reusable id from the library (`asset`) still works.
+// A video `visual` may set `sourceIn`/`sourceOut` (seconds into the clip) to play
+// a region of the source. The played length must equal the on-screen length — a
+// 1x-playback constraint, not part of the overlay contract. Omitted source fields
+// mean play from source 0 for the display duration. Images take no source fields.
 import { loadStyle } from './style.mjs';
 import { getLayout } from './diagrams/registry.mjs';
 import { validateDiagram } from './diagrams/render.mjs';
@@ -204,6 +208,36 @@ export function validatePlan(rawPlan, { duration = null, style = null, catalog =
       const frame = o.frame ?? DEFAULT_VISUAL_FRAME;
       if (!validFrames.includes(frame)) {
         problems.push(`${at}.frame must be one of ${validFrames.join(', ')}`);
+      }
+
+      // Source timing (video only). `sourceIn`/`sourceOut` select a region of the
+      // source clip, independent of where the overlay lands (`start`/`end`). At
+      // 1x the played length must equal the on-screen length.
+      const hasSource = o.sourceIn !== undefined || o.sourceOut !== undefined;
+      if (o.sourceIn !== undefined && !isNum(o.sourceIn)) {
+        problems.push(`${at}.sourceIn must be a number`);
+      }
+      if (o.sourceOut !== undefined && !isNum(o.sourceOut)) {
+        problems.push(`${at}.sourceOut must be a number`);
+      }
+      if (isNum(o.sourceIn) && o.sourceIn < 0) {
+        problems.push(`${at}.sourceIn cannot be negative`);
+      }
+      if (isNum(o.sourceIn) && isNum(o.sourceOut) && o.sourceOut <= o.sourceIn) {
+        problems.push(`${at}.sourceOut must be after sourceIn`);
+      }
+      if (hasSource && isNum(o.start) && isNum(o.end)) {
+        const srcIn = isNum(o.sourceIn) ? o.sourceIn : 0;
+        const srcOut = isNum(o.sourceOut) ? o.sourceOut : srcIn + (o.end - o.start);
+        const srcLen = srcOut - srcIn;
+        const winLen = o.end - o.start;
+        const tol = 1 / (s?.render?.final?.fps ?? 24);
+        if (Math.abs(srcLen - winLen) > tol) {
+          problems.push(
+            `${at} source length ${Math.round(srcLen * 1000) / 1000}s must equal the on-screen ` +
+            `length ${Math.round(winLen * 1000) / 1000}s at 1x playback`
+          );
+        }
       }
     } else if (o.kind === 'diagram') {
       if (typeof o.name !== 'string' || !o.name.trim()) {

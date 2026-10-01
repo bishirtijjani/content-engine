@@ -114,13 +114,37 @@ test('renders a visual on the burnt orange canvas', () => {
   assert.ok(html.includes('object-fit: contain'));
 });
 
-test('a video visual renders a muted <video>', () => {
+test('a video visual is a root-level clip the runtime can seek', () => {
   const { html } = build(
-    { overlays: [{ kind: 'visual', file: 'data/visuals/demo/clip.mp4', start: 0, end: 1, why: 'show the demo' }] },
+    { overlays: [{ kind: 'visual', file: 'data/x/clip.mp4', frame: 'full', start: 8, end: 14, why: 'show the clip', sourceIn: 2, sourceOut: 8 }] },
     { resolveVisual: () => 'visual-1.mp4' }
   );
-  assert.ok(html.includes('<video class="ov-media"'));
-  assert.ok(html.includes('muted'));
+  assert.ok(html.includes('<video id="ov-1" class="clip ov-media ov-video"'));
+  assert.ok(html.includes('data-start="8"'));
+  assert.ok(html.includes('data-duration="6"'));
+  assert.ok(html.includes('data-track-index="2"'));
+  assert.ok(html.includes('data-media-start="2"'));
+  assert.ok(html.includes('muted playsinline'));
+  // root-level: not wrapped in the .ov / .frame overlay box
+  assert.ok(!html.includes('ov ov-takeover'));
+});
+
+test('a video visual with omitted source fields plays from source 0', () => {
+  const { html } = build(
+    { overlays: [{ kind: 'visual', file: 'data/x/clip.mp4', start: 8, end: 14, why: 'show the clip' }] },
+    { resolveVisual: () => 'visual-1.mp4' }
+  );
+  assert.ok(html.includes('data-media-start="0"'));
+});
+
+test('a video visual in a split frame still insets the face', () => {
+  const { html } = build(
+    { overlays: [{ kind: 'visual', file: 'data/x/clip.mp4', frame: 'left', start: 8, end: 14, why: 'show the clip' }] },
+    { resolveVisual: () => 'visual-1.mp4' }
+  );
+  assert.ok(html.includes('ov-video'));
+  assert.ok(html.includes("tl.set('#a-roll'"));
+  assert.ok(html.includes("left: '52%'"));
 });
 
 test('skips a visual whose file cannot be resolved', () => {

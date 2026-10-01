@@ -404,6 +404,50 @@ test('savePlan: throws without a target', () => {
   db.close();
 });
 
+test('savePlan: refuses a visual whose file is not on disk', () => {
+  const db = freshDb();
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Missing visual', 'shot')").run();
+  attachFootage(db, 1);
+  const engine = new ProductionEngine(db);
+  const plan = engine.newPlan().visual({ at: [8, 14], file: 'data/nope/missing.mp4', why: 'show it' });
+  const result = engine.savePlan({ targetId: 1, plan });
+  assert.equal(result.saved, false);
+  assert.ok(result.problems.some((p) => /visual not found/.test(p)), result.problems.join(' | '));
+  db.close();
+});
+
+test('savePlan: refuses a video source range past the end of the clip', () => {
+  const db = freshDb();
+  const dir = mkdtempSync(path.join(tmpdir(), 'visual-'));
+  const clip = path.join(dir, 'clip.mp4');
+  writeFileSync(clip, 'x');
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Range', 'shot')").run();
+  attachFootage(db, 1);
+  const engine = new ProductionEngine(db);
+  engine._probe = (p) => ({ width: 1920, height: 1080, duration: p === clip ? 5 : 60, audioOnly: false });
+  const plan = engine.newPlan().visual({ at: [8, 14], file: clip, why: 'show it', sourceIn: 2, sourceOut: 8 });
+  const result = engine.savePlan({ targetId: 1, plan });
+  assert.equal(result.saved, false);
+  assert.ok(result.problems.some((p) => /source range ends at 8s but the clip is only 5s/.test(p)), result.problems.join(' | '));
+  db.close();
+});
+
+test('savePlan: refuses sourceIn/sourceOut on an image visual', () => {
+  const db = freshDb();
+  const dir = mkdtempSync(path.join(tmpdir(), 'visual-'));
+  const image = path.join(dir, 'shot.png');
+  writeFileSync(image, 'x');
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Img source', 'shot')").run();
+  attachFootage(db, 1);
+  const engine = new ProductionEngine(db);
+  engine._probe = () => ({ width: 1920, height: 1080, duration: 60, audioOnly: false });
+  const plan = engine.newPlan().visual({ at: [8, 14], file: image, why: 'show it', sourceIn: 1, sourceOut: 7 });
+  const result = engine.savePlan({ targetId: 1, plan });
+  assert.equal(result.saved, false);
+  assert.ok(result.problems.some((p) => /apply only to video visuals, not images/.test(p)), result.problems.join(' | '));
+  db.close();
+});
+
 test('reviewPlan: opens a plan_review gate and returns the board', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Board', 'shot')").run();

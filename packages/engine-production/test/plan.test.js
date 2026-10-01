@@ -143,6 +143,52 @@ test('accepts a valid split frame', () => {
   assert.deepEqual(problems, []);
 });
 
+test('accepts a video visual whose source region matches the window', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it', sourceIn: 2, sourceOut: 8 }] },
+    opts
+  );
+  assert.deepEqual(problems, []);
+});
+
+test('accepts a video visual with omitted source fields (plays from 0)', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it' }] },
+    opts
+  );
+  assert.deepEqual(problems, []);
+});
+
+test('rejects a source length that does not match the on-screen length', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it', sourceIn: 2, sourceOut: 6 }] },
+    opts
+  );
+  assert.ok(problems.some((p) => /source length .* must equal/.test(p)), problems.join(' | '));
+});
+
+test('rejects a negative sourceIn and an inverted source range', () => {
+  const negative = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it', sourceIn: -1, sourceOut: 5 }] },
+    opts
+  );
+  assert.ok(negative.some((p) => /sourceIn cannot be negative/.test(p)), negative.join(' | '));
+
+  const inverted = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it', sourceIn: 5, sourceOut: 5 }] },
+    opts
+  );
+  assert.ok(inverted.some((p) => /sourceOut must be after sourceIn/.test(p)), inverted.join(' | '));
+});
+
+test('rejects a non-numeric source field', () => {
+  const problems = validatePlan(
+    { overlays: [{ kind: 'visual', file: 'data/x.mp4', frame: 'full', start: 8, end: 14, why: 'show it', sourceIn: '2' }] },
+    opts
+  );
+  assert.ok(problems.some((p) => /sourceIn must be a number/.test(p)), problems.join(' | '));
+});
+
 test('rejects a field the graphic does not take', () => {
   const problems = validatePlan(
     { overlays: [{ kind: 'graphic', name: 'stat-callout', start: 1, end: 3, why: 'show it', fields: { value: '8', nope: 'x' } }] }, opts

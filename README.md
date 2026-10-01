@@ -298,7 +298,9 @@ engine.schedule({ targetId });                 // after approval -> scheduled
   "sfx":   [ { "at": 12, "sound": "whoosh" } ] }
 ```
 
-`validatePlan()` refuses anything off-style (wrong length, overlapping overlays, unknown graphic, unknown field, unknown frame, missing or filler purpose, too many zooms, bad scale). Nothing renders if the plan fails.
+A **video** `visual` may select a region of its source with `sourceIn`/`sourceOut` (seconds into the clip), independent of where the overlay lands in the video (`start`/`end`). At 1x playback the source length must equal the on-screen length; omitted, it plays from source 0 for the display duration. Images take no source fields.
+
+`validatePlan()` refuses anything off-style (wrong length, overlapping overlays, unknown graphic, unknown field, unknown frame, missing or filler purpose, too many zooms, bad scale, a source length that does not match the on-screen length). The engine also refuses a visual whose file is not on disk, source fields on an image, or a source range past the end of the clip. Nothing renders if the plan fails.
 
 ### Frames and modes
 

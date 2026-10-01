@@ -24,9 +24,17 @@ export function newPlan() {
       plan.overlays.push({ kind: 'diagram', name, spec, why, start: at?.[0], end: at?.[1] });
       return builder;
     },
-    /** A picture or clip for this video. `at` is [start, end] in seconds. */
-    visual({ at, frame = 'full', file, asset, why } = {}) {
-      plan.overlays.push({ kind: 'visual', frame, file, asset, why, start: at?.[0], end: at?.[1] });
+    /**
+     * A picture or clip for this video. `at` is [start, end] in seconds.
+     * A video clip may name the region of its source to play with
+     * `sourceIn`/`sourceOut` (seconds into the file); the played length must
+     * equal the on-screen length (1x playback). Omit them to play from 0.
+     */
+    visual({ at, frame = 'full', file, asset, why, sourceIn, sourceOut } = {}) {
+      const overlay = { kind: 'visual', frame, file, asset, why, start: at?.[0], end: at?.[1] };
+      if (sourceIn !== undefined) overlay.sourceIn = sourceIn;
+      if (sourceOut !== undefined) overlay.sourceOut = sourceOut;
+      plan.overlays.push(overlay);
       return builder;
     },
     /** A camera push. */

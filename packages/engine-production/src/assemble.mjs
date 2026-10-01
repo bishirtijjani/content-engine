@@ -68,6 +68,7 @@ function renderOverlays(overlays, { frames, templatesDir, resolveVisual, width, 
 
     let inner = '';
     let frameName = null;
+    let videoSrc = null;
 
     if (o.kind === 'graphic') {
       let t;
@@ -98,17 +99,34 @@ function renderOverlays(overlays, { frames, templatesDir, resolveVisual, width, 
     } else {
       const key = o.file || o.asset;
       const src = resolveVisual ? resolveVisual(key) : key;
-      if (!src) return; // file missing on disk — skip, engine logs it
+      if (!src) return; // file missing on disk — the engine refuses it at plan time
       frameName = o.frame || 'full';
-      inner = IMAGE_EXT.test(src)
-        ? `<img class="ov-media" src="${esc(src)}" alt="" />`
-        : `<video class="ov-media" src="${esc(src)}" muted playsinline></video>`;
+      if (IMAGE_EXT.test(src)) {
+        inner = `<img class="ov-media" src="${esc(src)}" alt="" />`;
+      } else {
+        // A video must be a DIRECT child of the composition root — the runtime
+        // only seeks/decodes root-level media. Its timing lives on the media
+        // element (data-start/duration/media-start), never on a timed wrapper.
+        videoSrc = src;
+      }
     }
 
     const frame = frames[frameName];
     if (!frame) return; // unknown frame — validatePlan already refuses these
     if (frame.mode === 'split') splits.push({ start, end: r3(o.end), face: frame.face });
     else takeovers.push({ start, end: r3(o.end) });
+
+    if (videoSrc) {
+      // Root-level video clip. `sourceIn` skips into the source; the played
+      // length is the on-screen length (1x). Omitted sourceIn means play from 0.
+      const srcIn = Number.isFinite(o.sourceIn) ? o.sourceIn : 0;
+      clips.push(
+        `      <video id="${id}" class="clip ov-media ov-video" src="${esc(videoSrc)}" ` +
+        `data-start="${start}" data-duration="${dur}" data-track-index="2" ` +
+        `data-media-start="${r3(srcIn)}" muted playsinline style="${frameStyle(frame)}"></video>`
+      );
+      return;
+    }
 
     const canvasClass = frame.mode === 'takeover' ? 'ov ov-takeover' : 'ov ov-split';
     clips.push(
@@ -248,6 +266,8 @@ ${layer.css}
       .ov-split { background: transparent; }
       .frame { position: absolute; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
       .ov-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: calc(var(--u) * 18px); box-shadow: 0 calc(var(--u) * 16px) calc(var(--u) * 44px) rgba(0,0,0,.35); }
+      /* a root-level video clip: positioned by its frame rect, driven by the runtime */
+      .ov-video { position: absolute; z-index: 2; }
       .ov-graphic { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
       .ov-diagram { width: 100%; height: 100%; display: block; }
       /* captions sit above everything; the band is a keep-out for visuals */
