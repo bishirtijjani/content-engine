@@ -1,15 +1,19 @@
 // Production Engine — "turn a cleaned recording into a finished video."
 //
 // Pipeline:
-//   process_footage -> edit -> request_review -> [human: asset_review] -> schedule
+//   process_footage -> save_snapshot_plan -> plan_snapshots
+//     -> [human: snapshot_plan_review] -> edit -> request_review
+//     -> [human: asset_review] -> schedule
 //
 // Owned states: shot, editing
 //
-// The engine is the single home for production. It never writes content: the
-// agent writes a PLAN (structured JSON, stored in content_items.video_plan),
-// and this engine checks it against the locked style, builds one composition
-// (untouched footage + captions + overlays + zooms), renders it, lays sound
-// effects under the voice, and asks the human to review.
+// The engine never writes content. The agent writes a SEGMENT PLAN
+// (Video -> Segments -> Beats): FOOTAGE (the face) and SNAPSHOT segments (one
+// completed b-roll composition each, built by its beats). The engine derives the
+// word-timed footage, validates the plan, renders one still per snapshot plus a
+// contact sheet, and STOPS for the human (snapshot_plan_review). On approval it
+// builds one composition, renders it, lays sound under the voice, and asks the
+// human to review.
 //
 // State transitions:
 //   ready_to_shoot -> shot     (no gate — footage attached)
@@ -17,13 +21,16 @@
 //   editing -> scheduled       (requires asset_review gate — human approves)
 //
 // Actions:
-//   process_footage  attach the cleaned file, move to shot
-//   list_footage     list the video files waiting in data/
-//   edit             build + render the long video from the agent's plan
-//   make_short       package a start/end range as a vertical short
-//   request_review   ask the human to watch the edit
-//   resubmit         ask again after the human rejected it
-//   schedule         move forward after the human approved
+//   process_footage        attach the cleaned file, move to shot
+//   list_footage           list the video files waiting in data/
+//   save_snapshot_plan     store the agent-written segment plan
+//   plan_snapshots         derive beats, validate, render the plan, stop for approval
+//   approve_snapshot_plan  the human approves the plan (in chat)
+//   preview                build + render a low-res preview
+//   edit                   build + render the final video
+//   request_review         ask the human to watch the edit
+//   resubmit               ask again after the human rejected it
+//   schedule               move forward after the human approved
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -32,22 +39,17 @@ import {
   PROJECT_ROOT,
   transition,
   requestGate,
+  decideGate,
   latestPending,
   contentItem,
 } from '@content-os/core';
-import { buildComposition } from './assemble.mjs';
 import { mixSfx } from './mix.mjs';
-import { validatePlan, parsePlan, summarizePlan, emptyPlan } from './plan.mjs';
 import { buildMenu } from './menu.mjs';
-import { newPlan as makePlan } from './plan-builder.mjs';
 import { buildScriptWords } from './script-captions.mjs';
+import { planVideo, deriveNarrationBeats, buildWords } from './composition/snapshot-plan.mjs';
+import { buildSnapshotComposition } from './composition/timeline.mjs';
+import { validateSnapshotPlan, summarizeSnapshotPlan } from './composition/snapshot-spec.mjs';
 import { loadStyle, LEXICON_PATH, PACKAGE_ROOT } from './style.mjs';
-import {
-  loadCatalog,
-  resolveVisualPath,
-  resolveSfxPath,
-  validationCatalog,
-} from './library.mjs';
 
 // Resolve the hyperframes CLI path relative to this package's location.
 // On Windows, node_modules/.bin entries are shell scripts, so we use the
@@ -55,32 +57,48 @@ import {
 const HYPERFRAMES_BIN = path.join(PROJECT_ROOT, 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs');
 
 const DATA_DIR = path.join(PROJECT_ROOT, 'data');
-const COMPOSITIONS_DIR = path.join(DATA_DIR, 'compositions');
-const RENDERS_DIR = path.join(DATA_DIR, 'renders');
+
 const TRANSCRIBE_PY = path.join(PACKAGE_ROOT, 'tools', 'transcribe.py');
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v']);
-const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif']);
 
 export class ProductionEngine extends BaseEngine {
   static NAME = 'production';
   static OWNED_STATES = ['shot', 'editing'];
-  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_plan', 'review_plan', 'plan_board', 'preview', 'edit', 'make_short', 'request_review', 'resubmit', 'schedule'];
+  static ACTIONS = ['process_footage', 'list_footage', 'menu', 'save_snapshot_plan', 'plan_snapshots', 'approve_snapshot_plan', 'preview', 'edit', 'request_review', 'resubmit', 'schedule'];
 
   static ACTION_METHODS = {
     process_footage: 'processFootage',
     list_footage: 'listFootage',
     menu: 'menu',
-    save_plan: 'savePlan',
-    review_plan: 'reviewPlan',
-    plan_board: 'planBoard',
+    save_snapshot_plan: 'saveSnapshotPlan',
+    plan_snapshots: 'planSnapshots',
+    approve_snapshot_plan: 'approveSnapshotPlan',
     preview: 'preview',
     edit: 'edit',
-    make_short: 'makeShort',
     request_review: 'requestReview',
     resubmit: 'resubmit',
     schedule: 'schedule',
   };
+
+  /**
+   * @param {object} db
+   * @param {object} [opts]
+   * @param {string} [opts.dataDir] - the data root (defaults to <repo>/data). Set
+   *   in tests so composition/render writes never touch the real project data.
+   */
+  constructor(db, { dataDir = null } = {}) {
+    super(db);
+    this.dataDir = dataDir ? path.resolve(dataDir) : DATA_DIR;
+  }
+
+  get compositionsDir() {
+    return path.join(this.dataDir, 'compositions');
+  }
+
+  get rendersDir() {
+    return path.join(this.dataDir, 'renders');
+  }
 
   // =========================================================================
   // PROCESS FOOTAGE — attach the cleaned file, move to shot
@@ -128,11 +146,8 @@ export class ProductionEngine extends BaseEngine {
     }
 
     let recordingId = null;
-    let visualsDir = null;
     if (resolved) {
       recordingId = this._attachFootage(item, resolved);
-      visualsDir = this._visualsDir(resolved);
-      mkdirSync(visualsDir, { recursive: true });
     } else {
       for (const recId of recordingIds) {
         this.db.prepare(
@@ -151,10 +166,10 @@ export class ProductionEngine extends BaseEngine {
     this.log('process_footage', {
       targetType: 'content_item', targetId: item.id,
       message: resolved
-        ? `attached ${path.basename(resolved)}; drop this video's pictures in ${path.relative(PROJECT_ROOT, visualsDir).split(path.sep).join('/')}`
+        ? `attached ${path.basename(resolved)}`
         : `attached ${recordingId ?? 'footage'}, moved to 'shot'`,
     });
-    return { processed: 1, skipped: 0, recordingId: recordingId ?? undefined, path: resolved ?? undefined, visualsDir: visualsDir ?? undefined };
+    return { processed: 1, skipped: 0, recordingId: recordingId ?? undefined, path: resolved ?? undefined };
   }
 
   /** List the video files waiting in data/ so the agent can offer them. */
@@ -178,176 +193,157 @@ export class ProductionEngine extends BaseEngine {
   }
 
   // =========================================================================
-  // MENU / PLAN — the model reads the menu, then writes a plan
+  // MENU — the model reads the menu, then writes a segment plan
   // =========================================================================
 
   /**
-   * The menu the model reads before writing a plan: frames, templates (with
-   * their fields and frame), the visuals for this video, and the sound cues.
+   * The menu the model reads before writing a segment plan: the brand doctrine,
+   * the snapshot concepts + their slots, the beat actions/transitions, the cue
+   * rule, and the icon vocabulary. Orientation follows the footage.
    * @param {Object} [opts]
-   * @param {number} [opts.targetId] - include that item's .visuals/ folder
+   * @param {number} [opts.targetId] - orient the menu to that item's footage
    */
   menu({ targetId = null } = {}) {
-    const base = buildMenu();
-    if (!targetId) return base;
-
+    if (!targetId) return buildMenu();
     const item = this._item(targetId);
     const footage = this._primaryFootage(item.id);
-    if (!footage) return base;
-
-    const dir = this._visualsDir(path.resolve(PROJECT_ROOT, footage.file_path));
-    if (!existsSync(dir)) return base;
-
-    const visuals = readdirSync(dir)
-      .filter((f) => !f.startsWith('.') && !f.toLowerCase().endsWith('.txt'))
-      .map((f) => ({
-        file: path.relative(PROJECT_ROOT, path.join(dir, f)).split(path.sep).join('/'),
-        what: f.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '),
-      }));
-    return { ...base, visuals };
+    if (!footage) return buildMenu();
+    const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
+    const orientation = this._resolveOrientation(null, this._probe(videoPath));
+    return buildMenu({ orientation });
   }
 
-  /** Start a new plan. The model calls the returned builder's methods. */
-  newPlan() {
-    return makePlan();
+  // =========================================================================
+  // SEGMENT PLAN — the mandatory front half of production.
+  //
+  // Model: Video -> Segments -> Beats. Every video must produce a segment plan
+  // — the narration beats grouped into segments (FOOTAGE + SNAPSHOT), each
+  // snapshot ONE completed composition — rendered to a still per snapshot plus a
+  // contact sheet, with a beats table. It must be approved before the video can
+  // be built.
+  // =========================================================================
+
+  /** The on-disk project folder for an item's composition work. */
+  _compositionDir(itemId) {
+    return path.join(this.compositionsDir, `item-${itemId}`);
+  }
+
+  /** Where the agent-written snapshot plan input lives for an item. */
+  _snapshotPlanInput(itemId) {
+    return path.join(this._compositionDir(itemId), 'snapshots.plan.json');
+  }
+
+  /** The saved snapshot plan for an item, or null when none is written. */
+  _readSnapshotPlan(itemId) {
+    const abs = this._snapshotPlanInput(itemId);
+    if (!existsSync(abs)) return null;
+    try { return JSON.parse(readFileSync(abs, 'utf8')); } catch { return null; }
   }
 
   /**
-   * Save an agent-written plan. Validates against the menu first; refuses
-   * anything off-style. The engine never writes the plan — it only finalizes it.
-   * @param {Object} opts
-   * @param {number} opts.targetId
-   * @param {Object} opts.plan - a builder or a plain plan object
+   * Build the runtime composition from a snapshot plan. The a-roll + words are
+   * assembled here; the scenes/timeline come from composition/timeline.mjs.
    */
-  savePlan({ targetId = null, plan = null } = {}) {
-    if (!targetId) throw new Error('save_plan requires { targetId }');
+  _buildSnapshots(item, footage, snapshotPlan, { videoPath, probe, duration, style, compositionDir, mode = 'final', orientation = 'portrait', fit = 'cover' }) {
+    const mediaSrc = this._sourceInto(compositionDir, videoPath);
+    const asrWords = this._transcriptFor(compositionDir, videoPath);
+    const clock = this._captionClock(compositionDir, videoPath, asrWords);
+    const scriptText = this._scriptText(item);
+    const words = scriptText ? buildScriptWords(scriptText, clock.words) : clock.words;
+    const dims = this._renderDims(style, mode, probe, orientation);
+    const { html, scenes, beats } = buildSnapshotComposition({
+      plan: snapshotPlan,
+      words,
+      videoSrc: mediaSrc,
+      width: dims.width,
+      height: dims.height,
+      duration,
+      style,
+      orientation,
+      fit,
+      fps: dims.fps,
+    });
+    return { html, scenes, beats };
+  }
+
+  /**
+   * Save the agent-written snapshot plan input. Shape-only here; the full gates
+   * run in planSnapshots() (which hard-fails on anything off-model).
+   */
+  saveSnapshotPlan({ targetId = null, plan = null } = {}) {
+    if (!targetId) throw new Error('save_snapshot_plan requires { targetId }');
     const item = this._item(targetId);
     const raw = typeof plan?.toJSON === 'function' ? plan.toJSON() : plan;
-    if (!raw) throw new Error('save_plan requires { plan }');
-
-    const style = loadStyle();
-    const catalog = loadCatalog();
-    const footage = this._primaryFootage(item.id);
-    const duration = footage ? this._probe(path.resolve(PROJECT_ROOT, footage.file_path)).duration : null;
-
-    const problems = [
-      ...validatePlan(raw, { duration, style, catalog: validationCatalog(catalog) }),
-      ...this._visualMediaProblems(raw, { catalog }),
-    ];
-    if (problems.length) {
-      this.log('save_plan', {
-        targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: `plan refused: ${problems.join(' | ')}`,
-      });
-      return { saved: false, problems };
+    if (!raw || !(Array.isArray(raw.segments) || Array.isArray(raw.snapshots))) {
+      throw new Error('save_snapshot_plan requires { plan } with a segments list');
     }
-
-    this.db.prepare(
-      "UPDATE content_items SET video_plan = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(JSON.stringify(raw), item.id);
-
-    this.log('save_plan', {
-      targetType: 'content_item', targetId: item.id,
-      message: `plan saved (${summarizePlan(raw).overlays} overlay(s))`,
-    });
-    return { saved: true, plan: raw };
+    mkdirSync(this._compositionDir(item.id), { recursive: true });
+    const abs = this._snapshotPlanInput(item.id);
+    writeFileSync(abs, JSON.stringify(raw, null, 2) + '\n', 'utf8');
+    this.log('save_snapshot_plan', { targetType: 'content_item', targetId: item.id, message: 'snapshot plan saved' });
+    return { saved: true, path: abs };
   }
-
-  // =========================================================================
-  // REVIEW PLAN — the storyboard gate: the human sees the board before a render
-  // =========================================================================
 
   /**
-   * Ask the human to review the board before any render. Returns the board the
-   * agent presents in chat (one line per overlay + the emphasis + the zooms) and
-   * opens a `plan_review` gate. preview() and edit() refuse until that gate is
-   * approved — a render is expensive, a look at the board is not.
+   * The mandatory plan step. Derives the narration beats, validates the snapshot
+   * plan, renders one still per snapshot + the snapshot grid, writes the beats
+   * table, then opens the snapshot_plan_review gate and STOPS for the human.
+   * HARD-FAILS without narration or a valid plan.
    */
-  reviewPlan({ targetId = null, note = null, dryRun = false } = {}) {
-    if (!targetId) throw new Error('review_plan requires { targetId }');
+  async planSnapshots({ targetId = null } = {}) {
+    if (!targetId) throw new Error('plan_snapshots requires { targetId }');
     const item = this._item(targetId);
-    const plan = parsePlan(item.video_plan);
-    if (plan === null) {
-      this.log('review_plan', {
-        targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: 'no plan written yet — the agent writes the plan first',
-      });
-      return { processed: 0, skipped: 1 };
-    }
+    const footage = this._primaryFootage(item.id);
+    if (!footage) throw new Error('no footage attached — nothing to plan');
+    const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
+    const probe = this._probe(videoPath);
+    const style = loadStyle();
+    const orientation = this._resolveOrientation(null, probe);
+    const compositionDir = this._compositionDir(item.id);
+    mkdirSync(compositionDir, { recursive: true });
 
-    const board = this.planBoard({ targetId });
-    const pending = latestPending(this.db, 'plan_review', 'content_item', item.id);
-    if (pending) {
-      this.log('review_plan', {
-        targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: `plan_review already waiting on the human (id ${pending.id})`,
-      });
-      return { processed: 0, skipped: 1, board };
-    }
+    const asrWords = this._transcriptFor(compositionDir, videoPath);
+    const clock = this._captionClock(compositionDir, videoPath, asrWords);
+    const scriptText = this._scriptText(item);
 
-    if (dryRun) {
-      this.log('review_plan', {
-        targetType: 'content_item', targetId: item.id,
-        message: 'would ask the human to review the board (dry run)',
-      });
-      return { processed: 1, skipped: 0, board };
-    }
+    const input = this._snapshotPlanInput(item.id);
+    if (!existsSync(input)) throw new Error(`no snapshot plan written — expected ${input}`);
+    const plan = JSON.parse(readFileSync(input, 'utf8'));
 
-    requestGate(this.db, 'plan_review', 'content_item', item.id, {
+    const dims = this._renderDims(style, 'final', probe, orientation);
+    const outDir = path.join(compositionDir, 'plan');
+    const result = await planVideo({
+      plan, style, outDir, htmlDir: path.join(outDir, 'html'),
+      scriptText, transcriptJson: clock.words,
+      width: dims.width, height: dims.height, orientation,
+    });
+
+    requestGate(this.db, 'snapshot_plan_review', 'content_item', item.id, {
       requestedBy: `engine:${this.name}`,
-      note: note ?? 'board ready to review before a render',
+      note: 'snapshot plan ready — review the stills + beats table',
     });
-    this.log('review_plan', {
-      targetType: 'content_item', targetId: item.id, message: 'asked the human to review the board',
+    this.log('plan_snapshots', {
+      targetType: 'content_item', targetId: item.id,
+      message: `snapshot plan: ${result.summary.segments} segments (${result.summary.snapshots} snapshots), ${result.summary.beats} beats`,
     });
-    return { processed: 1, skipped: 0, board };
+    return { processed: 1, skipped: 0, ...result };
   }
 
-  /** The board: a beat-by-beat read of the saved plan, for the chat. */
-  planBoard({ targetId = null } = {}) {
-    if (!targetId) throw new Error('plan_board requires { targetId }');
+  /** Approve the snapshot plan (the human says yes in chat). */
+  approveSnapshotPlan({ targetId = null } = {}) {
+    if (!targetId) throw new Error('approve_snapshot_plan requires { targetId }');
     const item = this._item(targetId);
-    const plan = parsePlan(item.video_plan) ?? emptyPlan();
-    const catalog = loadCatalog();
-    const vcat = validationCatalog(catalog);
-    const templateIndex = vcat.templateIndex;
-    const diagramIndex = vcat.diagramIndex;
-
-    const overlays = (plan.overlays ?? []).map((o) => {
-      const frame = o.kind === 'graphic'
-        ? templateIndex?.[o.name]?.frame
-        : o.kind === 'diagram'
-          ? diagramIndex?.[o.name]?.frame
-          : (o.frame || 'full');
-      return {
-        start: o.start,
-        end: o.end,
-        kind: o.kind,
-        name: o.name ?? null,
-        frame: frame ?? null,
-        fields: o.fields ?? null,
-        spec: o.spec ?? null,
-        file: o.file ?? o.asset ?? null,
-        sourceIn: o.sourceIn ?? null,
-        sourceOut: o.sourceOut ?? null,
-        why: o.why,
-      };
-    });
-    const approved = this._planReviewApproved(item.id);
-    return {
-      targetId: item.id,
-      emphasis: plan.captions?.emphasis ?? [],
-      overlays,
-      zooms: plan.zooms ?? [],
-      sfx: plan.sfx ?? [],
-      approved,
-    };
+    const pending = latestPending(this.db, 'snapshot_plan_review', 'content_item', item.id);
+    if (!pending) throw new Error('no snapshot plan waiting for approval');
+    decideGate(this.db, pending.id, 'approved', { decidedBy: 'human' });
+    this.log('approve_snapshot_plan', { targetType: 'content_item', targetId: item.id, message: 'snapshot plan approved' });
+    return { approved: true };
   }
 
-  /** True when the latest plan_review gate for the item is approved. */
-  _planReviewApproved(itemId) {
+  /** True when the latest snapshot_plan_review gate for the item is approved. */
+  snapshotPlanApproved(itemId) {
     const row = this.db.prepare(
-      "SELECT status FROM gates WHERE gate_type = 'plan_review' AND target_type = 'content_item' " +
+      "SELECT status FROM gates WHERE gate_type = 'snapshot_plan_review' AND target_type = 'content_item' " +
       'AND target_id = ? ORDER BY id DESC LIMIT 1'
     ).get(itemId);
     return row !== undefined && row.status === 'approved';
@@ -375,51 +371,51 @@ export class ProductionEngine extends BaseEngine {
       return { processed: 0, skipped: 1 };
     }
 
-    const plan = parsePlan(item.video_plan);
-    if (plan === null) {
-      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: 'no plan written yet' });
-      return { processed: 0, skipped: 1 };
+    const snapshotPlan = this._readSnapshotPlan(item.id);
+    if (snapshotPlan === null) {
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: 'no snapshot plan written yet' });
+      return { processed: 0, skipped: 1, needsSnapshotPlan: true };
     }
 
     const style = loadStyle();
-    const catalog = loadCatalog();
     const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
     const probe = this._probe(videoPath);
     const duration = probe.duration ?? item.desired_length_seconds ?? 60;
+    const orientation = this._resolveOrientation(null, probe);
+    const fit = this._fitFor(orientation, probe);
+    const compositionDir = path.join(this.compositionsDir, `item-${item.id}`);
 
-    const problems = [
-      ...validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) }),
-      ...this._visualMediaProblems(plan, { catalog }),
-    ];
+    // Re-run the full gates (narration cue/coverage included) at build time.
+    const narration = this._narrationFor(item, compositionDir, videoPath);
+    const problems = validateSnapshotPlan(snapshotPlan, narration ?? {});
     if (problems.length) {
-      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `plan failed the style check: ${problems.join(' | ')}` });
+      this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `snapshot plan is invalid: ${problems.join(' | ')}` });
       return { processed: 0, skipped: 1, problems };
     }
 
-    if (!this._planReviewApproved(item.id)) {
+    if (!this.snapshotPlanApproved(item.id)) {
       this.log('preview', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: 'plan not reviewed yet — show the board in chat and open a plan_review gate first',
+        message: 'snapshot plan not approved yet — show the plan in chat and approve it before rendering',
       });
-      return { processed: 0, skipped: 1, needsPlanReview: true, board: this.planBoard({ targetId: item.id }) };
+      return { processed: 0, skipped: 1, needsSnapshotPlan: true };
     }
 
-    const dims = this._renderDims(style, 'preview', probe);
-    const summary = summarizePlan(plan);
+    const dims = this._renderDims(style, 'preview', probe, orientation);
+    const summary = summarizeSnapshotPlan(snapshotPlan);
     if (dryRun) {
-      this.log('preview', { targetType: 'content_item', targetId: item.id, message: `would render a ${dims.width}x${dims.height} preview: ${summary.overlays} overlay(s) (dry run)` });
+      this.log('preview', { targetType: 'content_item', targetId: item.id, message: `would render a ${dims.width}x${dims.height} preview: ${summary.snapshots} snapshot(s), ${summary.beats} beat(s) (dry run)` });
       return { processed: 1, skipped: 0 };
     }
 
-    const compositionDir = path.join(COMPOSITIONS_DIR, `item-${item.id}`);
     mkdirSync(compositionDir, { recursive: true });
 
-    const { html } = this._buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir, mode: 'preview' });
+    const { html } = this._buildSnapshots(item, footage, snapshotPlan, { videoPath, probe, duration, style, compositionDir, mode: 'preview', orientation, fit });
     writeFileSync(path.join(compositionDir, 'index.html'), html, 'utf8');
 
-    mkdirSync(RENDERS_DIR, { recursive: true });
-    const outputPath = path.join(RENDERS_DIR, `item-${item.id}.preview.mp4`);
-    const render = this._renderComposition(compositionDir, outputPath, style, 'preview');
+    mkdirSync(this.rendersDir, { recursive: true });
+    const outputPath = path.join(this.rendersDir, `item-${item.id}.preview.mp4`);
+    const render = this._renderComposition(compositionDir, outputPath, style, 'preview', orientation);
     if (!render.success) {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'error', message: `render failed: ${render.error}` });
       return { processed: 0, skipped: 1 };
@@ -461,59 +457,60 @@ export class ProductionEngine extends BaseEngine {
       return { processed: 0, skipped: 1, assets: 0 };
     }
 
-    const plan = parsePlan(item.video_plan);
-    if (plan === null) {
+    const snapshotPlan = this._readSnapshotPlan(item.id);
+    if (snapshotPlan === null) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: 'no plan written yet — the agent writes the plan, the engine builds it',
+        message: 'no snapshot plan written yet — plan the video before building it',
       });
-      return { processed: 0, skipped: 1, assets: 0 };
+      return { processed: 0, skipped: 1, assets: 0, needsSnapshotPlan: true };
     }
 
     const style = loadStyle();
-    const catalog = loadCatalog();
     const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
     const probe = this._probe(videoPath);
     const duration = probe.duration ?? item.desired_length_seconds ?? 60;
+    const orientation = this._resolveOrientation(null, probe);
+    const fit = this._fitFor(orientation, probe);
+    const dims = this._renderDims(style, 'final', probe, orientation);
+    const compositionDir = path.join(this.compositionsDir, `item-${item.id}`);
 
-    const problems = [
-      ...validatePlan(plan, { duration, style, catalog: validationCatalog(catalog) }),
-      ...this._visualMediaProblems(plan, { catalog }),
-    ];
+    // Re-run the full gates (narration cue/coverage included) at build time.
+    const narration = this._narrationFor(item, compositionDir, videoPath);
+    const problems = validateSnapshotPlan(snapshotPlan, narration ?? {});
     if (problems.length) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: `plan failed the style check: ${problems.join(' | ')}`,
+        message: `snapshot plan is invalid: ${problems.join(' | ')}`,
       });
       return { processed: 0, skipped: 1, assets: 0, problems };
     }
 
-    if (!this._planReviewApproved(item.id)) {
+    if (!this.snapshotPlanApproved(item.id)) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
-        message: 'plan not reviewed yet — show the board in chat and open a plan_review gate first',
+        message: 'snapshot plan not approved yet — show the plan in chat and approve it before building',
       });
-      return { processed: 0, skipped: 1, assets: 0, needsPlanReview: true, board: this.planBoard({ targetId: item.id }) };
+      return { processed: 0, skipped: 1, assets: 0, needsSnapshotPlan: true };
     }
 
-    const summary = summarizePlan(plan);
+    const summary = summarizeSnapshotPlan(snapshotPlan);
     if (dryRun) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id,
-        message: `would build the video: ${summary.overlays} overlay(s), ${summary.zooms} zoom(s), ${summary.sfx} sound(s) (dry run)`,
+        message: `would build the video: ${summary.snapshots} snapshot(s), ${summary.beats} beat(s) (dry run)`,
       });
       return { processed: 1, skipped: 0, assets: 0 };
     }
 
-    const compositionDir = path.join(COMPOSITIONS_DIR, `item-${item.id}`);
     mkdirSync(compositionDir, { recursive: true });
 
-    const { html, overlayCount } = this._buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir });
+    const { html, scenes } = this._buildSnapshots(item, footage, snapshotPlan, { videoPath, probe, duration, style, compositionDir, mode: 'final', orientation, fit });
     writeFileSync(path.join(compositionDir, 'index.html'), html, 'utf8');
 
-    mkdirSync(RENDERS_DIR, { recursive: true });
-    const picturePath = path.join(RENDERS_DIR, `item-${item.id}.mp4`);
-    const render = this._renderComposition(compositionDir, picturePath, style);
+    mkdirSync(this.rendersDir, { recursive: true });
+    const picturePath = path.join(this.rendersDir, `item-${item.id}.mp4`);
+    const render = this._renderComposition(compositionDir, picturePath, style, 'final', orientation);
     if (!render.success) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'error',
@@ -526,12 +523,12 @@ export class ProductionEngine extends BaseEngine {
     let finalPath = picturePath;
     const mix = mixSfx({
       videoPath: picturePath,
-      outputPath: path.join(RENDERS_DIR, `item-${item.id}.mixed.mp4`),
-      sfx: plan.sfx ?? [],
+      outputPath: path.join(this.rendersDir, `item-${item.id}.mixed.mp4`),
+      sfx: [],
       style,
-      resolveSfx: (id) => resolveSfxPath(id, catalog),
+      resolveSfx: () => null,
     });
-    if (mix.mixed) finalPath = path.join(RENDERS_DIR, `item-${item.id}.mixed.mp4`);
+    if (mix.mixed) finalPath = path.join(this.rendersDir, `item-${item.id}.mixed.mp4`);
     else if (mix.error) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'error',
@@ -540,12 +537,12 @@ export class ProductionEngine extends BaseEngine {
     }
 
     this.db.prepare(
-      'INSERT INTO assets (content_item_id, platform, file_path, status, duration_seconds) VALUES (?, ?, ?, ?, ?)'
-    ).run(item.id, 'original', finalPath, 'review', duration);
+      'INSERT INTO assets (content_item_id, platform, file_path, status, duration_seconds, width, height, orientation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(item.id, 'original', finalPath, 'review', duration, dims.width, dims.height, orientation);
 
     transition(this.db, item.id, 'editing', {
       actor: `engine:${this.name}`,
-      reason: `video built (${overlayCount} overlay(s)) and rendered`,
+      reason: `video built (${scenes} scene(s)) and rendered`,
     });
 
     this.log('edit', {
@@ -553,111 +550,6 @@ export class ProductionEngine extends BaseEngine {
       message: `rendered ${finalPath}, created asset, moved to 'editing'`,
     });
     return { processed: 1, skipped: 0, assets: 1 };
-  }
-
-  // =========================================================================
-  // MAKE SHORT — package a start/end range as a vertical short
-  // =========================================================================
-
-  /**
-   * Package a range of the footage as a 9:16 short.
-   * @param {Object} opts
-   * @param {number} opts.targetId
-   * @param {number} opts.start - seconds
-   * @param {number} opts.end   - seconds
-   * @param {boolean} [opts.dryRun]
-   */
-  makeShort({ targetId = null, start = null, end = null, dryRun = false } = {}) {
-    if (!targetId) throw new Error('make_short requires { targetId, start, end }');
-    if (typeof start !== 'number' || typeof end !== 'number' || end <= start) {
-      throw new Error('make_short requires numeric { start, end } with end after start');
-    }
-    const item = this._item(targetId);
-
-    const footage = this._primaryFootage(item.id);
-    if (!footage) {
-      this.log('make_short', {
-        targetType: 'content_item', targetId: item.id, status: 'skipped', message: 'no footage attached yet',
-      });
-      return { processed: 0, skipped: 1, assets: 0 };
-    }
-
-    const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
-    const probe = this._probe(videoPath);
-    if (probe.duration && end > probe.duration + 0.001) {
-      throw new Error(`short ends at ${end}s but the footage is only ${Math.round(probe.duration)}s long`);
-    }
-
-    if (dryRun) {
-      this.log('make_short', {
-        targetType: 'content_item', targetId: item.id,
-        message: `would cut ${start}s–${end}s into a 9:16 short (dry run)`,
-      });
-      return { processed: 1, skipped: 0, assets: 0 };
-    }
-
-    const style = loadStyle();
-    const catalog = loadCatalog();
-    const dir = path.join(COMPOSITIONS_DIR, `item-${item.id}-short-${Math.round(start)}`);
-    mkdirSync(dir, { recursive: true });
-
-    // Trim the segment (re-encode so the cut is frame-accurate and start is 0).
-    const segment = path.join(dir, `segment${path.extname(videoPath)}`);
-    const trim = this._trim(videoPath, start, end, segment);
-    if (!trim.success) {
-      this.log('make_short', {
-        targetType: 'content_item', targetId: item.id, status: 'error', message: `trim failed: ${trim.error}`,
-      });
-      return { processed: 0, skipped: 1, assets: 0 };
-    }
-
-    const plan = parsePlan(item.video_plan) ?? { captions: {}, overlays: [], zooms: [], sfx: [] };
-    const shifted = this._shiftPlan(plan, start, end);
-    const words = this._transcriptFor(dir, segment).filter((w) => w.start >= start && w.end <= end)
-      .map((w) => ({ ...w, start: w.start - start, end: w.end - start }));
-    const shortDuration = end - start;
-
-    const { html } = buildComposition({
-      words,
-      videoSrc: path.basename(segment),
-      width: 1080,
-      height: 1920,
-      duration: shortDuration,
-      style,
-      lexiconPath: LEXICON_PATH,
-      plan: shifted,
-      resolveVisual: this._copyVisuals(shifted.overlays, dir, catalog),
-    });
-    writeFileSync(path.join(dir, 'index.html'), html, 'utf8');
-
-    mkdirSync(RENDERS_DIR, { recursive: true });
-    const picture = path.join(RENDERS_DIR, `item-${item.id}-short-${Math.round(start)}.mp4`);
-    const render = this._renderComposition(dir, picture, style);
-    if (!render.success) {
-      this.log('make_short', {
-        targetType: 'content_item', targetId: item.id, status: 'error', message: `render failed: ${render.error}`,
-      });
-      return { processed: 0, skipped: 1, assets: 0 };
-    }
-
-    const mix = mixSfx({
-      videoPath: picture,
-      outputPath: path.join(RENDERS_DIR, `item-${item.id}-short-${Math.round(start)}.mixed.mp4`),
-      sfx: shifted.sfx ?? [],
-      style,
-      resolveSfx: (id) => resolveSfxPath(id, catalog),
-    });
-    const finalPath = mix.mixed ? path.join(RENDERS_DIR, `item-${item.id}-short-${Math.round(start)}.mixed.mp4`) : picture;
-
-    this.db.prepare(
-      'INSERT INTO assets (content_item_id, platform, file_path, status, duration_seconds, notes) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(item.id, 'other', finalPath, 'review', shortDuration, `short ${start}s-${end}s`);
-
-    this.log('make_short', {
-      targetType: 'content_item', targetId: item.id,
-      message: `rendered short ${start}s-${end}s to ${finalPath}`,
-    });
-    return { processed: 1, skipped: 0, assets: 1, path: finalPath };
   }
 
   // =========================================================================
@@ -863,71 +755,6 @@ export class ProductionEngine extends BaseEngine {
     return candidates.find((p) => existsSync(p)) ?? null;
   }
 
-  /** Find a visual path: absolute, or relative to the repo root or data/. */
-  _resolveVisualFile(filePath) {
-    const candidates = path.isAbsolute(filePath)
-      ? [filePath]
-      : [
-          path.resolve(PROJECT_ROOT, filePath),
-          path.resolve(DATA_DIR, filePath),
-          path.resolve(process.cwd(), filePath),
-        ];
-    return candidates.find((p) => existsSync(p)) ?? null;
-  }
-
-  /** The folder a video's pictures belong in: next to the video, <name>.visuals/. */
-  _visualsDir(videoPath) {
-    const base = path.basename(videoPath, path.extname(videoPath));
-    return path.join(path.dirname(videoPath), `${base}.visuals`);
-  }
-
-  /**
-   * Refuse visuals the renderer cannot use: a file that is not on disk, source
-   * fields on an image, or a source range past the end of the clip. validatePlan
-   * is pure; this resolves files and probes video, so a bad visual is caught at
-   * save/plan/preview/edit time instead of silently at render time.
-   */
-  _visualMediaProblems(plan, { catalog = null } = {}) {
-    const problems = [];
-    const cat = catalog ?? loadCatalog();
-    const overlays = Array.isArray(plan?.overlays) ? plan.overlays : [];
-    const fps = loadStyle()?.render?.final?.fps ?? 24;
-    const tol = 1 / fps;
-
-    overlays.forEach((o, i) => {
-      if (!o || o.kind !== 'visual') return;
-      const at = `overlays[${i}]`;
-      const file = typeof o.file === 'string' ? o.file.trim() : '';
-      const asset = typeof o.asset === 'string' ? o.asset.trim() : '';
-      const src = file ? this._resolveVisualFile(file) : (asset ? resolveVisualPath(asset, cat) : null);
-      if (!src) {
-        problems.push(`${at} visual not found: ${file || asset || '(unnamed)'}`);
-        return;
-      }
-
-      const hasSource = o.sourceIn !== undefined || o.sourceOut !== undefined;
-      if (IMAGE_EXT.has(path.extname(src).toLowerCase())) {
-        if (hasSource) {
-          problems.push(`${at} sourceIn/sourceOut apply only to video visuals, not images`);
-        }
-        return;
-      }
-
-      // A video: the requested source region must fit inside the real clip.
-      const probe = this._probe(src);
-      if (!probe.duration) return; // ffprobe missing or unreadable — skip the range check
-      const srcIn = Number.isFinite(o.sourceIn) ? o.sourceIn : 0;
-      const srcOut = Number.isFinite(o.sourceOut)
-        ? o.sourceOut
-        : (Number.isFinite(o.start) && Number.isFinite(o.end) ? srcIn + (o.end - o.start) : null);
-      if (srcOut !== null && srcOut > probe.duration + tol) {
-        problems.push(`${at} source range ends at ${srcOut}s but the clip is only ${probe.duration}s`);
-      }
-    });
-
-    return problems;
-  }
-
   /** Create the session + recording rows and link them to the item. */
   _attachFootage(item, videoPath) {
     const probe = this._probe(videoPath);
@@ -1004,31 +831,65 @@ export class ProductionEngine extends BaseEngine {
     return JSON.parse(readFileSync(transcriptPath, 'utf8'));
   }
 
-  /** Copy a video's visuals into the composition dir; return key -> in-project name. */
-  _copyVisuals(overlays, compositionDir, catalog) {
-    const map = {};
-    let n = 0;
-    for (const o of overlays ?? []) {
-      if (o.kind !== 'visual') continue;
-      const key = o.file || o.asset;
-      const src = o.file ? this._resolveVisualFile(o.file) : resolveVisualPath(o.asset, catalog);
-      if (!src) continue;
-      const name = `visual-${++n}${path.extname(src)}`;
-      const dest = path.join(compositionDir, name);
-      if (!existsSync(dest)) copyFileSync(src, dest);
-      map[key] = name;
+  /**
+   * The narration (words + beats) for a plan's build-time gates, when a script
+   * and transcript already exist. Never transcribes — returns null when the
+   * narration is not yet available, so a build can still be attempted before the
+   * plan-time gates have run (they remain the source of truth).
+   */
+  _narrationFor(item, compositionDir, videoPath) {
+    const scriptText = this._scriptText(item);
+    if (!scriptText) return null;
+    const local = path.join(compositionDir, 'transcript.json');
+    const sibling = videoPath.replace(/\.[^.]+$/, '.transcript.json');
+    const file = existsSync(local) ? local : (existsSync(sibling) ? sibling : null);
+    if (!file) return null;
+    try {
+      const transcriptJson = JSON.parse(readFileSync(file, 'utf8'));
+      return { words: buildWords(scriptText, transcriptJson), beats: deriveNarrationBeats({ scriptText, transcriptJson }) };
+    } catch {
+      return null;
     }
-    return (id) => map[id] ?? null;
   }
 
-  /** The canvas size for a render mode (preview | final), from the style. */
-  _renderDims(style, mode, probe) {
+  /**
+   * Resolve the output orientation. Default is the footage's own orientation:
+   * portrait footage makes a portrait master, landscape makes landscape. A plan
+   * may override it explicitly with `plan.output.orientation`.
+   */
+  _resolveOrientation(plan, probe) {
+    const explicit = plan?.output?.orientation;
+    if (explicit === 'portrait' || explicit === 'landscape') return explicit;
+    const w = probe?.width;
+    const h = probe?.height;
+    if (w && h) return h > w ? 'portrait' : 'landscape';
+    return 'landscape';
+  }
+
+  /**
+   * How the a-roll fills the canvas. Same orientation -> `cover` (fill the
+   * frame, minimal edge crop). Different orientation -> `contain` (show the
+   * whole video, the backdrop in the empty space) so a portrait recording is
+   * never cropped into a landscape frame.
+   */
+  _fitFor(orientation, probe) {
+    const w = probe?.width;
+    const h = probe?.height;
+    if (!w || !h) return 'cover';
+    const source = h > w ? 'portrait' : 'landscape';
+    return source === orientation ? 'cover' : 'contain';
+  }
+
+  /** The canvas size for an orientation + render mode, from the locked style. */
+  _renderDims(style, mode, probe, orientation = 'landscape') {
     const r = style?.render ?? {};
-    const cfg = r[mode] ?? r.final ?? {};
+    const byOrientation = r[orientation] ?? {};
+    // Fall back to a legacy flat preview/final config for older style files.
+    const cfg = byOrientation[mode] ?? r[mode] ?? r.final ?? {};
     const width = cfg.width ?? probe?.width ?? 1920;
     const aspect = probe?.width && probe?.height ? probe.height / probe.width : 9 / 16;
     const height = cfg.height ?? Math.round(width * aspect);
-    return { width, height, fps: cfg.fps ?? 30 };
+    return { width, height, fps: cfg.fps ?? 30, orientation };
   }
 
   /**
@@ -1053,30 +914,6 @@ export class ProductionEngine extends BaseEngine {
     return { words: asrWords, source: 'transcript' };
   }
 
-  _buildLong(item, footage, plan, { videoPath, probe, duration, style, catalog, compositionDir, mode = 'final' }) {
-    const mediaSrc = this._sourceInto(compositionDir, videoPath);
-    const asrWords = this._transcriptFor(compositionDir, videoPath);
-    const clock = this._captionClock(compositionDir, videoPath, asrWords);
-    const scriptText = this._scriptText(item);
-    const words = scriptText ? buildScriptWords(scriptText, clock.words) : clock.words;
-    const dims = this._renderDims(style, mode, probe);
-    const { html, overlayCount } = buildComposition({
-      words,
-      videoSrc: mediaSrc,
-      width: dims.width,
-      height: dims.height,
-      duration,
-      style,
-      lexiconPath: LEXICON_PATH,
-      emphasis: plan.captions?.emphasis,
-      plan,
-      resolveVisual: this._copyVisuals(plan.overlays, compositionDir, catalog),
-      audioOnly: probe.audioOnly,
-      fps: dims.fps,
-    });
-    return { html, overlayCount };
-  }
-
   /** The final spoken script text for captions, or null when there is none. */
   _scriptText(item) {
     const raw = item?.script;
@@ -1092,33 +929,8 @@ export class ProductionEngine extends BaseEngine {
     return null;
   }
 
-  /** Shift a plan's timings into a trimmed segment's timeline. */
-  _shiftPlan(plan, start, end) {
-    const inRange = (t) => typeof t === 'number' && t >= start && t <= end;
-    return {
-      captions: plan.captions ?? {},
-      overlays: (plan.overlays ?? [])
-        .filter((o) => inRange(o.start) && inRange(o.end))
-        .map((o) => ({ ...o, start: o.start - start, end: o.end - start })),
-      zooms: (plan.zooms ?? []).filter((z) => inRange(z.at)).map((z) => ({ ...z, at: z.at - start })),
-      sfx: (plan.sfx ?? []).filter((s) => inRange(s.at)).map((s) => ({ ...s, at: s.at - start })),
-    };
-  }
-
-  /** Trim a segment out of the footage with ffmpeg (frame-accurate re-encode). */
-  _trim(videoPath, start, end, outPath) {
-    const res = spawnSync('ffmpeg', [
-      '-y', '-ss', String(start), '-to', String(end), '-i', videoPath,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-c:a', 'aac', '-b:a', '192k', outPath,
-    ], { encoding: 'utf8', timeout: 300000 });
-    if (res.error) return { success: false, error: res.error.message };
-    if (res.status !== 0) return { success: false, error: `ffmpeg exit ${res.status}: ${String(res.stderr).slice(0, 400)}` };
-    return { success: true };
-  }
-
   /** Render a HyperFrames composition to MP4 at the locked output quality. */
-  _renderComposition(compositionDir, outputPath, style = null, mode = 'final') {
+  _renderComposition(compositionDir, outputPath, style = null, mode = 'final', orientation = 'landscape') {
     const env = { ...process.env };
     if (!env.HYPERFRAMES_BROWSER_PATH) {
       const chromePaths = [
@@ -1139,7 +951,8 @@ export class ProductionEngine extends BaseEngine {
     const s = style ?? loadStyle();
     const r = s?.render ?? {};
     const crf = s?.output?.crf;
-    const fps = r[mode]?.fps ?? r.fps;
+    const canvas = r[orientation]?.[mode] ?? r[mode] ?? {};
+    const fps = canvas.fps ?? r.fps;
 
     const args = [
       '--disable-warning=ExperimentalWarning', HYPERFRAMES_BIN, 'render', compositionDir, '-o', outputPath,

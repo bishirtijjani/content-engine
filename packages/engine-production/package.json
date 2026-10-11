@@ -9,11 +9,15 @@
     "./tools/lib/captions.mjs": "./tools/lib/captions.mjs"
   },
   "scripts": {
-    "catalog": "node tools/build-asset-catalog.mjs",
-    "icons": "node tools/build-icons.mjs"
+    "icons": "node tools/build-icons.mjs",
+    "plan": "node tools/plan-snapshots.mjs",
+    "prepare": "node tools/build-icons.mjs"
   },
   "dependencies": {
     "@content-os/core": "*",
     "hyperframes": "^0.8.12"
+  },
+  "devDependencies": {
+    "@tabler/icons": "^3.49.0"
   }
 }
