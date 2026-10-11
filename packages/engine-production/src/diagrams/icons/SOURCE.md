@@ -1,16 +1,17 @@
-# Vendored icon sources
+# Icon sources
 
-The SVGs in this folder are the upstream **Tabler Icons** outline files used by
-the diagram system. They are vendored so the generated icon table can be
-rebuilt offline and so provenance is auditable.
+Icon geometry comes from the **`@tabler/icons`** npm package (MIT,
+https://tabler.io/icons), declared as a devDependency of this workspace.
 
-- Source: https://github.com/tabler/tabler-icons (branch `main`, `icons/outline/`)
-- License: MIT — see `LICENSE` beside this file.
-- Used by: `packages/engine-production/tools/build-icons.mjs`, which reads these
-  files and writes `src/diagrams/icons.generated.mjs`.
+- The build script reads the package's pre-parsed `tabler-nodes-outline.json`
+  (every outline icon's `<path d>` geometry — no SVG parsing, no network).
+- It writes `src/diagrams/icons.generated.mjs` (a plain JS table the runtime
+  reads with no fs, no network, no dependency). That file is **not committed**
+  (see `.gitignore`) so the full ~5,000-icon library stays available without
+  bloating the repo. It is produced on install via the package `prepare` script.
+- Regenerate any time: `npm run icons` (root) or
+  `npm --workspace @content-os/engine-production run icons`.
 
-Our public icon key maps to a file name in `build-icons.mjs` (`ICON_MAP`), for
-example `doc` -> `file-text.svg`, `gear` -> `settings.svg`, `chat` -> `message.svg`.
-
-To add an icon: vendor the upstream `.svg` here, add the mapping in
-`build-icons.mjs`, then run `npm --workspace @content-os/engine-production run icons`.
+`tools/build-icons.mjs` holds a small `ALIASES` map (our stable public keys such
+as `doc` -> `file-text`) so plans authored against the old icon names keep
+resolving. An unknown icon name fails loudly (see `primitives.iconGroup`).

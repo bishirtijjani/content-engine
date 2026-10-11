@@ -33,6 +33,24 @@ export function loadStyle(stylePath = STYLE_PATH) {
   return JSON.parse(fs.readFileSync(stylePath, 'utf8'));
 }
 
+/**
+ * The frame map for an orientation. Landscape uses `frames`; portrait uses
+ * `framesPortrait` (every slot full screen, no split). Falls back to `frames`
+ * for older style files.
+ * @param {Object} [style]
+ * @param {'portrait'|'landscape'} [orientation]
+ */
+export function framesFor(style = null, orientation = 'landscape') {
+  const s = style ?? loadStyle();
+  const map = orientation === 'portrait' ? (s.framesPortrait ?? s.frames ?? {}) : (s.frames ?? {});
+  // Keep only real frame entries (skip any stray comment/note keys).
+  const out = {};
+  for (const [name, f] of Object.entries(map)) {
+    if (f && typeof f === 'object' && typeof f.mode === 'string') out[name] = f;
+  }
+  return out;
+}
+
 /** Resolve a style path entry (assets/templates/input/...) against the repo root. */
 export function resolveStylePath(style, key) {
   const rel = style?.paths?.[key];

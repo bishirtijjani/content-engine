@@ -15,6 +15,7 @@
     "demo": "node --disable-warning=ExperimentalWarning demo.mjs",
     "smoke": "node --disable-warning=ExperimentalWarning scripts/smoke-pipeline.mjs",
     "reset": "node --disable-warning=ExperimentalWarning scripts/reset-content.mjs",
-    "clean": "node --disable-warning=ExperimentalWarning packages/engine-production/tools/clean/clean.mjs"
+    "clean": "node --disable-warning=ExperimentalWarning packages/engine-production/tools/clean/clean.mjs",
+    "icons": "node --disable-warning=ExperimentalWarning packages/engine-production/tools/build-icons.mjs"
   }
 }

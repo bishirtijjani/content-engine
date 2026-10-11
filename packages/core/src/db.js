@@ -16,7 +16,7 @@ export const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 export const DEFAULT_DB_PATH = path.join(PROJECT_ROOT, 'data', 'content.db');
 const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 const INDEXES_FILE = path.join(__dirname, 'indexes.sql');
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Migrations — run after the schema file (which creates new tables with
@@ -42,6 +42,16 @@ const MIGRATIONS = [
       // engine: captions/emphasis, overlays (templates + b-roll), zooms, sfx.
       // Mirrors how `script` holds the agent-written script for the content engine.
       addColumn(db, 'content_items', 'video_plan', 'TEXT');
+    },
+  },
+  {
+    version: 4,
+    up(db) {
+      // The rendered canvas's shape, so an asset records whether it is a
+      // portrait or landscape master (and at what resolution).
+      addColumn(db, 'assets', 'width', 'INTEGER');
+      addColumn(db, 'assets', 'height', 'INTEGER');
+      addColumn(db, 'assets', 'orientation', 'TEXT');
     },
   },
 ];

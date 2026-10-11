@@ -135,17 +135,21 @@ export function computeCaptionScenes({
 }
 
 /** The caption CSS (band position, type, shadow). */
-export function renderCaptionCSS(style, width) {
+export function renderCaptionCSS(style, width, orientation = null) {
   const s = style ?? loadStyle();
   const brand = s.brand ?? {};
   const capCfg = s.captions ?? {};
-  const fontCfg = capCfg.font || {};
+  // A portrait canvas needs its own band position and type scale. The locked
+  // style carries them under captions.orientation.portrait; landscape uses the base.
+  const ori = orientation ? (capCfg.orientation?.[orientation] ?? {}) : {};
+  const fontCfg = { ...(capCfg.font || {}), ...(ori.font || {}) };
+  const bandCfg = { ...(capCfg.band || {}), ...(ori.band || {}) };
   const base = Math.max(14, Math.round(width * (fontCfg.baseRatio ?? 0.052)));
   const emph = Math.round(base * (fontCfg.emphRatio ?? 1.8));
   const plainWeight = fontCfg.plainWeight ?? 600;
   const emphWeight = fontCfg.emphWeight ?? 900;
   const display = brand.fonts?.display || "Montserrat";
-  const bandTop = Math.round((capCfg.band?.top ?? 0.72) * 1000) / 10;
+  const bandTop = Math.round((bandCfg.top ?? 0.72) * 1000) / 10;
 
   return `      :root { --cap-shadow: 0 2px 6px rgba(0,0,0,.85), 0 6px 22px rgba(0,0,0,.75), 0 1px 2px rgba(0,0,0,.9); }
       .cap {
@@ -181,11 +185,11 @@ export function renderCaptionClips(lines, { leadColor = "#0f4c81", secondColor =
  * The caption layer: CSS + clip HTML + scene metadata, ready to drop into a
  * composition built by the assembler.
  */
-export function buildCaptionLayer({ words, width, style, lexiconPath, emphasis, duration } = {}) {
+export function buildCaptionLayer({ words, width, style, lexiconPath, emphasis, duration, orientation = null } = {}) {
   const s = style ?? loadStyle();
   const scenes = computeCaptionScenes({ words, width, style: s, lexiconPath, emphasis, duration });
   return {
-    css: renderCaptionCSS(s, width),
+    css: renderCaptionCSS(s, width, orientation),
     html: renderCaptionClips(scenes.lines, scenes),
     lines: scenes.lines,
     duration: scenes.duration,

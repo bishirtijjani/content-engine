@@ -9,8 +9,19 @@
     "noStockFootage": true,
     "keepOut": "Visuals never enter the caption band.",
     "screenRule": "If they need to look at it, it takes the screen (frame 'full' or 'center'). If it only supports what you are saying, it shares the screen (frame 'left' or 'right').",
+    "icons": {
+      "rule": "Icons are not optional decoration — they are what makes a frame feel designed. Every data figure, list item, process step, node and label should carry a relevant icon.",
+      "choose": "Pick the icon by meaning, from the full Tabler set (menu.icons). Give each element its own icon; do not repeat the same icon across a row unless the meaning is identical.",
+      "color": "Icons inherit the brand colour: white on the canvas, brand-blue or orange for emphasis, matching the figure they sit with.",
+      "restraint": "Relevant and on-brand only. A wrong or generic icon is worse than none — but 'none' should be the rare exception, not the default.",
+      "how": "Diagrams: set `icon` on nodes/steps/items. Composition: add an `icon` node (name + optional color) next to its figure or label."
+    },
+    "segments": {
+      "rule": "The video is an ordered list of segments: FOOTAGE (you talking — the face, no visuals) or SNAPSHOT (a b-roll section on the orange backdrop, one completed composition). Footage and b-roll are separated: the face shows only in footage segments and a snapshot always sits on the backdrop. Every narration beat is covered by exactly one segment.",
+      "everySlot": "In a snapshot, every element is hidden until its beat speaks it — every slot must be introduced by a beat, so nothing shows before its narration."
+    },
     "hook": {
-      "rule": "The hook is always you, talking to camera. No takeover overlay (frame 'full' or 'center') may start before the first sentence lands — the opening belongs to your face, never to a b-roll or a card. A split frame ('left' or 'right') is fine because your face stays on screen.",
+      "rule": "The hook is always FOOTAGE — you, talking to camera. The opening belongs to your face, never to a b-roll snapshot or a card.",
       "keepFaceSeconds": 6
     },
     "editorial": {
@@ -73,7 +84,13 @@
       "hold": 0.15,
       "lead": 0.08
     },
-    "band": { "top": 0.72, "keepOutAbove": 0.65 }
+    "band": { "top": 0.72, "keepOutAbove": 0.65 },
+    "orientation": {
+      "portrait": {
+        "band": { "top": 0.76, "keepOutAbove": 0.66 },
+        "font": { "baseRatio": 0.060, "emphRatio": 1.5 }
+      }
+    }
   },
 
   "cards": {
@@ -91,6 +108,97 @@
     "margin": 0.06,
     "radius": 18,
     "shadow": true
+  },
+
+  "layout": {
+    "note": "The shared placement vocabulary. `safe` is the area a visual may occupy (its bottom excludes the caption band). `sizes` is the max box for each size token as a fraction of the canvas; `at` anchors that box inside the safe area. Text uses only the width, as a maximum content width — the text wraps below it and is never stretched to fill.",
+    "safe": {
+      "landscape": { "top": 0.08, "right": 0.06, "bottom": 0.35, "left": 0.06 },
+      "portrait":  { "top": 0.10, "right": 0.06, "bottom": 0.34, "left": 0.06 }
+    },
+    "sizes": {
+      "landscape": {
+        "sm":   { "w": 0.42, "h": 0.50 },
+        "md":   { "w": 0.64, "h": 0.45 },
+        "lg":   { "w": 0.75, "h": 0.51 },
+        "full": { "w": 0.88, "h": 0.57 }
+      },
+      "portrait": {
+        "sm":   { "w": 0.50, "h": 0.36 },
+        "md":   { "w": 0.64, "h": 0.42 },
+        "lg":   { "w": 0.75, "h": 0.48 },
+        "full": { "w": 0.88, "h": 0.56 }
+      }
+    }
+  },
+
+  "text": {
+    "note": "Free text the model may place (labels, titles). A size token is the maximum content width; the text wraps below it. Roles fix type so free text stays on brand.",
+    "lineHeight": 1.12,
+    "maxCharsPerLine": 34,
+    "roles": {
+      "title":   { "font": "display", "weight": 900, "sizeRatio": 0.070, "color": "text",   "caps": false },
+      "heading": { "font": "display", "weight": 800, "sizeRatio": 0.050, "color": "text",   "caps": false },
+      "body":    { "font": "body",    "weight": 600, "sizeRatio": 0.030, "color": "text",   "caps": false },
+      "label":   { "font": "body",    "weight": 700, "sizeRatio": 0.024, "color": "accent", "caps": true }
+    },
+    "emph": { "color": "orange" },
+    "maxChars": { "title": 60, "heading": 90, "body": 220, "label": 40 }
+  },
+
+  "composition": {
+    "note": "The composition language's design tokens — a video type scale (ratios of canvas width), the zones a visual may occupy, and surface tones. Derived from brand/tokens.css and the brand colours above. A composition (beat -> scene graph) resolves its roles against these, so every frame stays on brand without hardcoding.",
+    "type": {
+      "kicker":   { "font": "body",    "weight": 800, "ratio": 0.028, "tracking": 0.22, "caps": true, "color": "text", "opacity": 0.82 },
+      "headline": { "font": "display", "weight": 900, "ratio": 0.085, "lineHeight": 1.02, "color": "text" },
+      "data":     { "font": "display", "weight": 900, "ratio": 0.300, "lineHeight": 1, "tracking": -0.04, "color": "text" },
+      "term":     { "font": "display", "weight": 800, "ratio": 0.105, "lineHeight": 1, "tracking": -0.03, "color": "text" },
+      "result":   { "font": "display", "weight": 900, "ratio": 0.225, "lineHeight": 1, "tracking": -0.04, "color": "text" },
+      "operator": { "font": "display", "weight": 800, "ratio": 0.060, "color": "brand", "opacity": 0.9 },
+      "unit":     { "font": "display", "weight": 800, "ratio": 0.050, "color": "brand" },
+      "icon":     { "ratio": 0.100, "stroke": 2, "color": "text", "opacity": 0.95 },
+      "label":    { "font": "body",    "weight": 600, "ratio": 0.040, "color": "text", "opacity": 0.92 },
+      "footnote": { "font": "body",    "weight": 600, "ratio": 0.026, "tracking": 0.02, "color": "text", "opacity": 0.72 }
+    },
+    "zones": {
+      "safe": { "top": 0.10, "bottom": 0.34, "left": 0.06, "right": 0.06 },
+      "grid": { "cols": 12, "rows": 16 }
+    },
+    "surfaces": {
+      "ink": "brand",
+      "accent": "accent",
+      "hairline": "rgba(255,255,255,0.22)",
+      "dot": "rgba(255,255,255,0.92)"
+    },
+    "motion": {
+      "note": "How a snapshot's beats animate. A beat's action.op (introduce/reveal/move/resize/restyle/retext/replace/highlight/hold) resolves against these; numeric figures count up to their exact value over countUp seconds. The root `motion` block is the fallback.",
+      "ease": "power2.out",
+      "in": 0.5,
+      "rise": 40,
+      "stagger": 0.1,
+      "highlight": { "scale": 1.06, "duration": 0.5 },
+      "countUp": 0.9
+    }
+  },
+
+  "shape": {
+    "note": "Small geometric accents in brand tones: a bar (filled block), a line (thin rule), a box (outline), or a circle (dot).",
+    "tones": { "accent": "orange", "brand": "blue", "quiet": "quiet" },
+    "box": { "radius": 18, "border": 0.006 },
+    "line": { "thickness": 0.004 },
+    "circle": { "maxDiameter": 0.18 }
+  },
+
+  "media": {
+    "note": "How a media element (image or video) is cropped inside its resolved frame. `fit` is contain (whole media, letterboxed) or cover (fill the frame, crop the overflow). `focus` picks the kept region of a cover crop (object-position). `camera` is the media's own deterministic pan/zoom across its on-screen window — the media moves inside its frame, unlike the element `motion` which animates the frame in. `overscan` is the extra scale a pan keeps so no empty edge is ever revealed.",
+    "focus": {
+      "center": [0.5, 0.5],
+      "top": [0.5, 0.18],
+      "bottom": [0.5, 0.82],
+      "left": [0.18, 0.5],
+      "right": [0.82, 0.5]
+    },
+    "camera": { "zoom": 0.12, "pan": 0.10, "overscan": 1.12 }
   },
 
   "backdrop": {
@@ -113,8 +221,14 @@
     "lowMemoryMode": false,
     "protocolTimeoutMs": 86400000,
     "timeoutMs": 86400000,
-    "preview": { "width": 480, "height": 270, "fps": 15 },
-    "final": { "width": 1920, "height": 1080, "fps": 24 }
+    "landscape": {
+      "preview": { "width": 480, "height": 270, "fps": 15 },
+      "final": { "width": 1920, "height": 1080, "fps": 24 }
+    },
+    "portrait": {
+      "preview": { "width": 270, "height": 480, "fps": 15 },
+      "final": { "width": 1080, "height": 1920, "fps": 24 }
+    }
   },
 
   "clean": {
@@ -156,8 +270,28 @@
     "right":  { "mode": "split",    "x": 0.52, "y": 0.10, "w": 0.42, "h": 0.50, "fit": "contain", "what": "a supporting visual or button; face on the left",  "face": { "x": 0.0,  "y": 0.0, "w": 0.48, "h": 1.0 } }
   },
 
+  "framesPortraitNote": "On a tall (9:16) canvas every overlay fills the whole screen and covers the video. There is no side-by-side split on tall video: a supporting note, a card, a diagram, or b-roll all become full screen. The face is hidden while the overlay plays. This is the permanent rule for portrait; the four names are kept so plans and templates stay valid, but they resolve to the same full-screen slot.",
+  "framesPortrait": {
+    "full":   { "mode": "takeover", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "fit": "contain", "what": "screenshots, screen recordings, diagrams, charts (full screen)" },
+    "center": { "mode": "takeover", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "fit": "contain", "what": "big stat, quote, CTA, title, prompt (full screen)" },
+    "left":   { "mode": "takeover", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "fit": "contain", "what": "a supporting visual or note (full screen on tall video)" },
+    "right":  { "mode": "takeover", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "fit": "contain", "what": "a supporting visual or button (full screen on tall video)" }
+  },
+
+  "footage": {
+    "minGapSeconds": 3.0,
+    "minSnapshotSeconds": 2.0,
+    "note": "Footage is a first-class visual segment (the face), the same rank as a snapshot. The engine derives it from the narration: a snapshot is on screen only while its content is building and shown (its first body element to its last), and every remaining stretch — a lead-in, a gap between snapshots, the hook, the tail — becomes footage, snapped to the exact narration words. A gap shorter than minGapSeconds is not worth a cut: the previous scene holds across it so b-roll stays seamless — keep this high enough that the face never flashes for a second or two between two b-rolls. A snapshot on screen shorter than minSnapshotSeconds is extended (the composition holds longer) so a b-roll never flickers."
+  },
+
   "motion": {
     "ease": "power2.out",
+    "in": 0.4,
+    "out": 0.3,
+    "slide": 0.12,
+    "ambient": 0.06,
+    "takeoverHoldGapSeconds": 2,
+    "note": "A gap shorter than takeoverHoldGapSeconds between two take-over scenes is not real face time: the face stays hidden across the whole run, so back-to-back b-roll reads as one visual block instead of flashing the footage at the seam. A gap of this length or longer returns the face; a split or a speaker:keep inside the gap always returns it.",
     "zoom": { "min": 1.0, "max": 1.25, "default": 1.12, "duration": 0.8 },
     "cardIn": 0.4,
     "cardOut": 0.3,

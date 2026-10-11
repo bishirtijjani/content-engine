@@ -9,6 +9,9 @@ videos/
 *.pyc
 __pycache__/
 
+# generated at install (npm run icons) — the full Tabler set is ~5k icons, kept out of git
+packages/engine-production/src/diagrams/icons.generated.mjs
+
 # logs
 *.log
 

@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS assets (
   file_path       TEXT,
   status          TEXT NOT NULL DEFAULT 'raw',       -- raw | processing | edited | review | approved | rejected
   duration_seconds REAL,
+  width           INTEGER,                           -- rendered canvas width in pixels
+  height          INTEGER,                           -- rendered canvas height in pixels
+  orientation     TEXT,                              -- portrait | landscape
   notes           TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
