@@ -1,8 +1,0 @@
-{
-  "name": "link-prompt",
-  "description": "Point the viewer to a link",
-  "frame": "center",
-  "fields": ["text"],
-  "html": "<div class=\"tpl-prompt\">{{text}}</div>",
-  "css": ".tpl-prompt{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*56px);line-height:1.15;text-align:center;color:var(--brand-text);max-width:calc(var(--u)*840px);text-shadow:0 calc(var(--u)*6px) calc(var(--u)*22px) rgba(0,0,0,.45)}"
-}

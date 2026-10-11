@@ -1,8 +1,0 @@
-{
-  "name": "checklist",
-  "description": "A title with checked items, one per line",
-  "frame": "center",
-  "fields": ["title", "items"],
-  "html": "<div class=\"tpl-check\"><div class=\"tpl-check-title\">{{title}}</div><div class=\"tpl-check-items\">{{items}}</div></div>",
-  "css": ".tpl-check{background:var(--brand-blue);border-radius:calc(var(--u)*18px);padding:calc(var(--u)*40px) calc(var(--u)*52px);box-shadow:0 calc(var(--u)*18px) calc(var(--u)*50px) rgba(0,0,0,.35);max-width:calc(var(--u)*780px)}.tpl-check-title{font-family:var(--brand-display);font-weight:800;font-size:calc(var(--u)*40px);color:var(--brand-orange);margin-bottom:calc(var(--u)*16px)}.tpl-check-items{font-family:var(--brand-body);font-weight:600;font-size:calc(var(--u)*32px);line-height:1.6;color:var(--brand-text);white-space:pre-line}"
-}

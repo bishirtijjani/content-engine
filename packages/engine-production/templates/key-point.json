@@ -1,8 +1,0 @@
-{
-  "name": "key-point",
-  "description": "One big statement, nothing else",
-  "frame": "center",
-  "fields": ["line"],
-  "html": "<div class=\"tpl-keypoint\"><div class=\"tpl-keypoint-rule\"></div><div class=\"tpl-keypoint-line\">{{line}}</div></div>",
-  "css": ".tpl-keypoint{display:flex;flex-direction:column;align-items:center;text-align:center;max-width:calc(var(--u)*840px)}.tpl-keypoint-rule{width:calc(var(--u)*80px);height:calc(var(--u)*8px);background:var(--brand-orange);margin-bottom:calc(var(--u)*26px)}.tpl-keypoint-line{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*64px);line-height:1.15;color:var(--brand-text);text-shadow:0 calc(var(--u)*6px) calc(var(--u)*22px) rgba(0,0,0,.45)}"
-}

@@ -1,8 +1,0 @@
-{
-  "name": "title-card",
-  "description": "A section title with a subtitle",
-  "frame": "center",
-  "fields": ["title", "subtitle"],
-  "html": "<div class=\"tpl-title\"><div class=\"tpl-title-main\">{{title}}</div><div class=\"tpl-title-sub\">{{subtitle}}</div></div>",
-  "css": ".tpl-title{text-align:center;max-width:calc(var(--u)*880px)}.tpl-title-main{font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*72px);line-height:1.05;color:var(--brand-text);text-transform:uppercase;text-shadow:0 calc(var(--u)*6px) calc(var(--u)*22px) rgba(0,0,0,.45)}.tpl-title-sub{margin-top:calc(var(--u)*14px);font-family:var(--brand-body);font-weight:600;font-size:calc(var(--u)*32px);color:var(--brand-text);opacity:.9}"
-}

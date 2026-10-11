@@ -1,8 +1,0 @@
-{
-  "name": "text-box",
-  "description": "A title with one line of supporting text",
-  "frame": "center",
-  "fields": ["title", "body"],
-  "html": "<div class=\"tpl-textbox\"><div class=\"tpl-textbox-title\">{{title}}</div><div class=\"tpl-textbox-body\">{{body}}</div></div>",
-  "css": ".tpl-textbox{background:var(--brand-blue);border-radius:calc(var(--u)*18px);border-left:calc(var(--u)*8px) solid var(--brand-orange);padding:calc(var(--u)*44px) calc(var(--u)*56px);box-shadow:0 calc(var(--u)*18px) calc(var(--u)*50px) rgba(0,0,0,.35);max-width:calc(var(--u)*760px)}.tpl-textbox-title{font-family:var(--brand-display);font-weight:800;font-size:calc(var(--u)*46px);line-height:1.15;color:var(--brand-text)}.tpl-textbox-body{margin-top:calc(var(--u)*14px);font-family:var(--brand-body);font-weight:500;font-size:calc(var(--u)*32px);line-height:1.4;color:var(--brand-text);opacity:.92}"
-}

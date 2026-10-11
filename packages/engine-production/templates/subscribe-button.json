@@ -1,8 +1,0 @@
-{
-  "name": "subscribe-button",
-  "description": "A subscribe button with the handle",
-  "frame": "right",
-  "fields": ["handle"],
-  "html": "<div class=\"tpl-sub\"><div class=\"tpl-sub-btn\">Subscribe</div><div class=\"tpl-sub-handle\">{{handle}}</div></div>",
-  "css": ".tpl-sub{display:flex;flex-direction:column;align-items:center;gap:calc(var(--u)*14px)}.tpl-sub-btn{background:var(--brand-blue);color:var(--brand-text);font-family:var(--brand-display);font-weight:900;font-size:calc(var(--u)*40px);padding:calc(var(--u)*18px) calc(var(--u)*44px);border-radius:calc(var(--u)*999px);box-shadow:0 calc(var(--u)*12px) calc(var(--u)*30px) rgba(0,0,0,.4);text-transform:uppercase;letter-spacing:.02em}.tpl-sub-handle{font-family:var(--brand-body);font-weight:700;font-size:calc(var(--u)*28px);color:var(--brand-blue)}"
-}
