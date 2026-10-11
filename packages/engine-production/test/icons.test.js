@@ -1,18 +1,28 @@
-// Icons — geometry sourced from Tabler (MIT), generated, merged with the custom seam.
+// Icons — geometry sourced from the @tabler/icons package, generated, merged with the custom seam.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ICON_PATHS, ICON_NAMES } from '../src/diagrams/icons.mjs';
 import { COMPUTED_ICON_PATHS } from '../src/diagrams/icons.generated.mjs';
 import { CUSTOM_ICON_PATHS } from '../src/diagrams/icons.custom.mjs';
 
-const PUBLIC_KEYS = ['user', 'doc', 'code', 'gear', 'database', 'send', 'check', 'bolt', 'chat', 'chart'];
+// Our stable public keys (aliases into the Tabler set) — kept for back-compat.
+const STABLE_KEYS = ['doc', 'gear', 'chat', 'chart'];
 
-test('the public icon API is unchanged', () => {
-  assert.deepEqual([...ICON_NAMES].sort(), [...PUBLIC_KEYS].sort());
+test('the whole Tabler outline library is available', () => {
+  assert.ok(ICON_NAMES.length > 5000, `expected the full set, got ${ICON_NAMES.length}`);
+  assert.deepEqual(Object.keys(COMPUTED_ICON_PATHS).sort(), [...ICON_NAMES].sort());
 });
 
-test('the generated set carries exactly the mapped keys', () => {
-  assert.deepEqual(Object.keys(COMPUTED_ICON_PATHS).sort(), [...PUBLIC_KEYS].sort());
+test('the stable alias keys resolve', () => {
+  for (const key of STABLE_KEYS) {
+    assert.ok(ICON_PATHS[key]?.length, `${key} resolves`);
+  }
+});
+
+test('semantic icons the scripts need exist', () => {
+  for (const name of ['clock', 'help', 'arrow-right', 'list', 'calendar']) {
+    assert.ok(ICON_PATHS[name]?.length, `${name} exists`);
+  }
 });
 
 test('every icon is a non-empty list of inline-safe path strings', () => {

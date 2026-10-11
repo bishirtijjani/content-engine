@@ -1,11 +1,28 @@
 // Production Engine — post-shoot pipeline tests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initDb } from '@content-os/core';
 import { ProductionEngine } from '../src/index.js';
+import { loadStyle } from '../src/style.mjs';
+
+/** A minimal valid segment plan, for the edit/preview gate tests. */
+const SNAP_PLAN = {
+  video: { id: 'x', duration: 30 },
+  segments: [
+    {
+      id: 's1', kind: 'snapshot', section: 'Start', concept: 'cta', frame: 'full', start: 0, end: 29,
+      composition: { kicker: 'Start', text: 'Do the math.', handle: '@x' },
+      beats: [{ id: 'b1', start: 0, end: 29, spoken: 'do it', action: { op: 'introduce', target: ['head', 'text', 'handle'] }, element: 'cta' }],
+    },
+  ],
+};
+
+/** A throwaway data root — tests must never write into the real data/ dir. */
+const TEST_DATA = mkdtempSync(path.join(tmpdir(), 'production-data-'));
+const cleanupComposition = (id) => rmSync(path.join(TEST_DATA, 'compositions', `item-${id}`), { recursive: true, force: true });
 
 function freshDb() {
   const dir = mkdtempSync(path.join(tmpdir(), 'production-engine-'));
@@ -46,7 +63,7 @@ function attachFootage(db, itemId) {
 test('processFootage: transitions ready_to_shoot to shot', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Shoot test', 'ready_to_shoot')").run();
-  const result = new ProductionEngine(db).processFootage({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1 });
   assert.equal(result.processed, 1);
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'shot');
   db.close();
@@ -58,7 +75,7 @@ test('processFootage: links recording IDs when provided', () => {
   db.prepare("INSERT INTO recording_sessions (title) VALUES ('Session 1')").run();
   db.prepare("INSERT INTO recordings (session_id, file_path) VALUES (1, '/tmp/rec1.mp4')").run();
   db.prepare("INSERT INTO recordings (session_id, file_path) VALUES (1, '/tmp/rec2.mp4')").run();
-  const result = new ProductionEngine(db).processFootage({ targetId: 1, recordingIds: [1, 2] });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1, recordingIds: [1, 2] });
   assert.equal(result.processed, 1);
   const links = db.prepare('SELECT * FROM content_item_recordings WHERE content_item_id = 1').all();
   assert.equal(links.length, 2);
@@ -71,7 +88,7 @@ test('processFootage: attaches a file path and creates the recording rows', () =
   const file = path.join(dir, 'clean.mp4');
   writeFileSync(file, 'x');
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Shoot test', 'ready_to_shoot')").run();
-  const result = new ProductionEngine(db).processFootage({ targetId: 1, filePath: file });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1, filePath: file });
   assert.equal(result.processed, 1);
   assert.ok(result.recordingId);
   const rec = db.prepare('SELECT * FROM recordings WHERE id = ?').get(result.recordingId);
@@ -84,7 +101,7 @@ test('processFootage: throws when the file path does not exist', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Shoot test', 'ready_to_shoot')").run();
   assert.throws(
-    () => new ProductionEngine(db).processFootage({ targetId: 1, filePath: 'nope/missing.mp4' }),
+    () => new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1, filePath: 'nope/missing.mp4' }),
     /footage not found/
   );
   db.close();
@@ -93,7 +110,7 @@ test('processFootage: throws when the file path does not exist', () => {
 test('processFootage: skips items not in ready_to_shoot', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Not ready', 'scripted')").run();
-  const result = new ProductionEngine(db).processFootage({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1 });
   assert.equal(result.skipped, 1);
   db.close();
 });
@@ -101,7 +118,7 @@ test('processFootage: skips items not in ready_to_shoot', () => {
 test('processFootage: dry-run does not transition', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Dry run', 'ready_to_shoot')").run();
-  const result = new ProductionEngine(db).processFootage({ targetId: 1, dryRun: true });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1, dryRun: true });
   assert.equal(result.processed, 1);
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'ready_to_shoot');
   db.close();
@@ -109,19 +126,19 @@ test('processFootage: dry-run does not transition', () => {
 
 test('processFootage: throws on missing targetId', () => {
   const db = freshDb();
-  assert.throws(() => new ProductionEngine(db).processFootage(), /targetId/);
+  assert.throws(() => new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage(), /targetId/);
   db.close();
 });
 
 test('processFootage: throws on unknown item', () => {
   const db = freshDb();
-  assert.throws(() => new ProductionEngine(db).processFootage({ targetId: 99 }), /not found/);
+  assert.throws(() => new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 99 }), /not found/);
   db.close();
 });
 
 test('listFootage: returns a files list', () => {
   const db = freshDb();
-  const result = new ProductionEngine(db).listFootage();
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).listFootage();
   assert.ok(Array.isArray(result.files));
   db.close();
 });
@@ -133,54 +150,71 @@ test('listFootage: returns a files list', () => {
 test('edit: skips items without footage', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status, video_plan) VALUES ('No footage', 'shot', '{}')").run();
-  const result = new ProductionEngine(db).edit({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).edit({ targetId: 1 });
   assert.equal(result.skipped, 1);
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'shot');
   db.close();
 });
 
-test('edit: skips items without an agent-written plan', () => {
+test('edit: skips items without a snapshot plan', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('No plan', 'shot')").run();
   attachFootage(db, 1);
-  const result = new ProductionEngine(db).edit({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).edit({ targetId: 1 });
   assert.equal(result.skipped, 1);
+  assert.equal(result.needsSnapshotPlan, true);
   db.close();
 });
 
-test('edit: dry-run processes with footage and a valid plan', () => {
+test('edit: refuses to build until the snapshot plan is approved', () => {
   const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status, video_plan) VALUES ('Edit', 'shot', '{}')").run();
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Edit', 'shot')").run();
   attachFootage(db, 1);
-  approveGateSync(db, 'plan_review', 1);
-  const result = new ProductionEngine(db).edit({ targetId: 1, dryRun: true });
-  assert.equal(result.processed, 1);
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  engine.saveSnapshotPlan({ targetId: 1, plan: SNAP_PLAN });
+
+  const blocked = engine.edit({ targetId: 1, dryRun: true });
+  assert.equal(blocked.processed, 0);
+  assert.equal(blocked.needsSnapshotPlan, true);
+
+  db.prepare(
+    "INSERT INTO gates (gate_type, target_type, target_id, requested_by, status) " +
+    "VALUES ('snapshot_plan_review', 'content_item', 1, 'test', 'pending')"
+  ).run();
+  engine.approveSnapshotPlan({ targetId: 1 });
+  const ok = engine.edit({ targetId: 1, dryRun: true });
+  assert.equal(ok.processed, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assets').get().n, 0);
+  cleanupComposition(1);
   db.close();
 });
 
-test('edit: refuses an off-style plan and reports why', () => {
+test('edit: refuses an invalid snapshot plan and reports why', () => {
   const db = freshDb();
-  const badPlan = JSON.stringify({ overlays: [{ kind: 'visual', asset: 'visuals/missing', start: 0, end: 2, why: 'show it' }] });
-  db.prepare("INSERT INTO content_items (title, status, video_plan) VALUES ('Bad plan', 'shot', ?)").run(badPlan);
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Bad plan', 'shot')").run();
   attachFootage(db, 1);
-  const result = new ProductionEngine(db).edit({ targetId: 1 });
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  const bad = structuredClone(SNAP_PLAN);
+  bad.segments[0].concept = 'nope';
+  engine.saveSnapshotPlan({ targetId: 1, plan: bad });
+  const result = engine.edit({ targetId: 1 });
   assert.equal(result.skipped, 1);
-  assert.ok(result.problems.some((p) => /not in the library/.test(p)));
+  assert.ok(result.problems.some((p) => /is not a snapshot concept/.test(p)));
+  cleanupComposition(1);
   db.close();
 });
 
 test('edit: skips items not in shot status', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status, video_plan) VALUES ('Wrong', 'ready_to_shoot', '{}')").run();
-  const result = new ProductionEngine(db).edit({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).edit({ targetId: 1 });
   assert.equal(result.skipped, 1);
   db.close();
 });
 
 test('edit: throws on missing targetId', () => {
   const db = freshDb();
-  assert.throws(() => new ProductionEngine(db).edit(), /targetId/);
+  assert.throws(() => new ProductionEngine(db, { dataDir: TEST_DATA }).edit(), /targetId/);
   db.close();
 });
 
@@ -191,7 +225,7 @@ test('edit: throws on missing targetId', () => {
 test('requestReview: requests asset_review gate for editing items', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Review', 'editing')").run();
-  const result = new ProductionEngine(db).requestReview({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).requestReview({ targetId: 1 });
   assert.equal(result.processed, 1);
   const gate = db.prepare('SELECT gate_type, status FROM gates WHERE target_id = 1').get();
   assert.equal(gate.gate_type, 'asset_review');
@@ -202,7 +236,7 @@ test('requestReview: requests asset_review gate for editing items', () => {
 test('requestReview: skips items not in editing', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Wrong', 'shot')").run();
-  assert.equal(new ProductionEngine(db).requestReview({ targetId: 1 }).skipped, 1);
+  assert.equal(new ProductionEngine(db, { dataDir: TEST_DATA }).requestReview({ targetId: 1 }).skipped, 1);
   db.close();
 });
 
@@ -213,14 +247,14 @@ test('requestReview: skips if a gate is already pending', () => {
     "INSERT INTO gates (gate_type, target_type, target_id, requested_by, status) " +
     "VALUES ('asset_review', 'content_item', 1, 'engine', 'pending')"
   ).run();
-  assert.equal(new ProductionEngine(db).requestReview({ targetId: 1 }).skipped, 1);
+  assert.equal(new ProductionEngine(db, { dataDir: TEST_DATA }).requestReview({ targetId: 1 }).skipped, 1);
   db.close();
 });
 
 test('requestReview: dry-run does not create a gate', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Dry', 'editing')").run();
-  assert.equal(new ProductionEngine(db).requestReview({ targetId: 1, dryRun: true }).processed, 1);
+  assert.equal(new ProductionEngine(db, { dataDir: TEST_DATA }).requestReview({ targetId: 1, dryRun: true }).processed, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM gates').get().n, 0);
   db.close();
 });
@@ -233,7 +267,7 @@ test('resubmit: requests a fresh gate after rejection', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Rejected', 'editing')").run();
   rejectGateSync(db, 'asset_review', 1);
-  const result = new ProductionEngine(db).resubmit({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).resubmit({ targetId: 1 });
   assert.equal(result.processed, 1);
   const gates = db.prepare('SELECT status FROM gates WHERE target_id = 1 ORDER BY id').all();
   assert.deepEqual(gates.map((g) => g.status), ['rejected', 'pending']);
@@ -244,7 +278,7 @@ test('resubmit: refuses missing target, unknown item, wrong status, or no reject
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Still shot', 'shot')").run();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Editing clean', 'editing')").run();
-  const engine = new ProductionEngine(db);
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
   assert.throws(() => engine.resubmit(), /targetId/);
   assert.throws(() => engine.resubmit({ targetId: 99 }), /not found/);
   assert.throws(() => engine.resubmit({ targetId: 1 }), /expected 'editing'/);
@@ -260,7 +294,7 @@ test('schedule: moves an approved item to scheduled', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Ready', 'editing')").run();
   approveGateSync(db, 'asset_review', 1);
-  const result = new ProductionEngine(db).schedule({ targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).schedule({ targetId: 1 });
   assert.equal(result.processed, 1);
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'scheduled');
   db.close();
@@ -269,7 +303,7 @@ test('schedule: moves an approved item to scheduled', () => {
 test('schedule: refuses without an approved gate', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('No gate', 'editing')").run();
-  assert.throws(() => new ProductionEngine(db).schedule({ targetId: 1 }), /asset_review/);
+  assert.throws(() => new ProductionEngine(db, { dataDir: TEST_DATA }).schedule({ targetId: 1 }), /asset_review/);
   db.close();
 });
 
@@ -279,21 +313,21 @@ test('schedule: refuses without an approved gate', () => {
 
 test('run: throws on unknown action', () => {
   const db = freshDb();
-  assert.throws(() => new ProductionEngine(db).run({ action: 'bogus' }), /unknown production action/);
+  assert.throws(() => new ProductionEngine(db, { dataDir: TEST_DATA }).run({ action: 'bogus' }), /unknown production action/);
   db.close();
 });
 
 test('run: dispatches to a specific action', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Dispatch', 'ready_to_shoot')").run();
-  const result = new ProductionEngine(db).run({ action: 'process_footage', targetId: 1 });
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).run({ action: 'process_footage', targetId: 1 });
   assert.equal(result.processed, 1);
   db.close();
 });
 
 test('pipeline: handles an empty database gracefully', () => {
   const db = freshDb();
-  const result = new ProductionEngine(db).pipeline();
+  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).pipeline();
   assert.equal(result.process_footage.processed, 0);
   assert.equal(result.edit.processed, 0);
   assert.equal(result.request_review.processed, 0);
@@ -306,182 +340,103 @@ test('surveyItems: counts items in owned states', () => {
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Shot 2', 'shot')").run();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Editing 1', 'editing')").run();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Idea', 'idea')").run();
-  const counts = new ProductionEngine(db).surveyItems();
+  const counts = new ProductionEngine(db, { dataDir: TEST_DATA }).surveyItems();
   assert.equal(counts.shot, 2);
   assert.equal(counts.editing, 1);
   db.close();
 });
 
 // ============================================================================
-// MAKE SHORT
+// MENU
 // ============================================================================
 
-test('makeShort: requires numeric start and end', () => {
+test('menu: exposes the segment model, concepts, actions and icons', () => {
   const db = freshDb();
-  const engine = new ProductionEngine(db);
-  assert.throws(() => engine.makeShort({ targetId: 1 }), /start, end/);
-  assert.throws(() => engine.makeShort({ targetId: 1, start: 5, end: 5 }), /end after start/);
-  db.close();
-});
-
-test('makeShort: skips items without footage', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('No footage', 'editing')").run();
-  const result = new ProductionEngine(db).makeShort({ targetId: 1, start: 5, end: 20 });
-  assert.equal(result.skipped, 1);
-  db.close();
-});
-
-test('makeShort: dry-run reports what it would cut', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Short', 'editing')").run();
-  attachFootage(db, 1);
-  const result = new ProductionEngine(db).makeShort({ targetId: 1, start: 270, end: 315, dryRun: true });
-  assert.equal(result.processed, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assets').get().n, 0);
-  db.close();
-});
-
-// ============================================================================
-// MENU / PLAN
-// ============================================================================
-
-test('menu: lists the four frames and the templates', () => {
-  const db = freshDb();
-  const m = new ProductionEngine(db).menu();
+  const m = new ProductionEngine(db, { dataDir: TEST_DATA }).menu();
+  assert.equal(m.plan.model.startsWith('Video -> Segments -> Beats'), true);
+  assert.deepEqual(m.plan.segmentKinds, ['footage', 'snapshot']);
+  assert.ok(m.plan.snapshotConcepts.includes('equation'));
+  assert.ok(m.plan.beatActions.includes('introduce'));
+  assert.ok(m.icons.count > 100);
   assert.deepEqual(m.frames.map((f) => f.name).sort(), ['center', 'full', 'left', 'right']);
-  assert.ok(m.templates.some((t) => t.name === 'stat-callout' && t.frame === 'center'));
-  assert.ok(Array.isArray(m.sfx));
   db.close();
 });
 
-test('menu: with a target lists that video\'s visuals folder', () => {
+test('menu: orients to the target item\'s footage', () => {
   const db = freshDb();
   const dir = mkdtempSync(path.join(tmpdir(), 'footage-'));
   const file = path.join(dir, 'myvideo.mp4');
   writeFileSync(file, 'x');
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Menu', 'shot')").run();
-  const engine = new ProductionEngine(db);
-  const attached = engine.processFootage({ targetId: 1, filePath: file });
-  writeFileSync(path.join(attached.visualsDir, 'dashboard.png'), 'x');
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  engine.processFootage({ targetId: 1, filePath: file });
+  engine._probe = () => ({ width: 720, height: 1280, duration: 60, audioOnly: false });
   const m = engine.menu({ targetId: 1 });
-  assert.ok(m.visuals.some((v) => v.file.endsWith('dashboard.png')));
+  assert.ok(m.plan && m.icons);
   db.close();
 });
 
-test('savePlan: stores a builder-made plan', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Plan', 'shot')").run();
-  attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  const plan = engine.newPlan()
-    .caption({ emphasis: ['automated'] })
-    .graphic({ at: [8, 12], name: 'stat-callout', fields: { value: '8 hrs', label: 'saved' }, why: 'show the hours saved' });
-  const result = engine.savePlan({ targetId: 1, plan });
-  assert.equal(result.saved, true);
-  const stored = JSON.parse(db.prepare('SELECT video_plan FROM content_items WHERE id = 1').get().video_plan);
-  assert.equal(stored.overlays.length, 1);
-  assert.deepEqual(stored.captions.emphasis, ['automated']);
-  db.close();
-});
-
-test('savePlan: refuses an off-style plan', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Bad plan', 'shot')").run();
-  attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  const plan = engine.newPlan().visual({ at: [1, 4], file: 'data/x.png', why: 'show it', frame: 'corner' });
-  const result = engine.savePlan({ targetId: 1, plan });
-  assert.equal(result.saved, false);
-  assert.ok(result.problems.some((p) => /frame must be one of/.test(p)));
-  assert.equal(db.prepare('SELECT video_plan FROM content_items WHERE id = 1').get().video_plan, null);
-  db.close();
-});
-
-test('savePlan: throws without a target', () => {
-  const db = freshDb();
-  assert.throws(() => new ProductionEngine(db).savePlan({ plan: {} }), /targetId/);
-  db.close();
-});
-
-test('savePlan: refuses a visual whose file is not on disk', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Missing visual', 'shot')").run();
-  attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  const plan = engine.newPlan().visual({ at: [8, 14], file: 'data/nope/missing.mp4', why: 'show it' });
-  const result = engine.savePlan({ targetId: 1, plan });
-  assert.equal(result.saved, false);
-  assert.ok(result.problems.some((p) => /visual not found/.test(p)), result.problems.join(' | '));
-  db.close();
-});
-
-test('savePlan: refuses a video source range past the end of the clip', () => {
-  const db = freshDb();
-  const dir = mkdtempSync(path.join(tmpdir(), 'visual-'));
-  const clip = path.join(dir, 'clip.mp4');
-  writeFileSync(clip, 'x');
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Range', 'shot')").run();
-  attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  engine._probe = (p) => ({ width: 1920, height: 1080, duration: p === clip ? 5 : 60, audioOnly: false });
-  const plan = engine.newPlan().visual({ at: [8, 14], file: clip, why: 'show it', sourceIn: 2, sourceOut: 8 });
-  const result = engine.savePlan({ targetId: 1, plan });
-  assert.equal(result.saved, false);
-  assert.ok(result.problems.some((p) => /source range ends at 8s but the clip is only 5s/.test(p)), result.problems.join(' | '));
-  db.close();
-});
-
-test('savePlan: refuses sourceIn/sourceOut on an image visual', () => {
-  const db = freshDb();
-  const dir = mkdtempSync(path.join(tmpdir(), 'visual-'));
-  const image = path.join(dir, 'shot.png');
-  writeFileSync(image, 'x');
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Img source', 'shot')").run();
-  attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  engine._probe = () => ({ width: 1920, height: 1080, duration: 60, audioOnly: false });
-  const plan = engine.newPlan().visual({ at: [8, 14], file: image, why: 'show it', sourceIn: 1, sourceOut: 7 });
-  const result = engine.savePlan({ targetId: 1, plan });
-  assert.equal(result.saved, false);
-  assert.ok(result.problems.some((p) => /apply only to video visuals, not images/.test(p)), result.problems.join(' | '));
-  db.close();
-});
-
-test('reviewPlan: opens a plan_review gate and returns the board', () => {
-  const db = freshDb();
-  db.prepare("INSERT INTO content_items (title, status) VALUES ('Board', 'shot')").run();
-  const engine = new ProductionEngine(db);
-  engine.savePlan({
-    targetId: 1,
-    plan: { captions: { emphasis: ['automate'] }, overlays: [{ kind: 'graphic', name: 'key-point', start: 8, end: 12, why: 'land the point', fields: { line: 'Automate the work' } }], zooms: [], sfx: [] },
-  });
-  const r = engine.reviewPlan({ targetId: 1 });
-  assert.equal(r.processed, 1);
-  assert.equal(r.board.overlays.length, 1);
-  assert.equal(r.board.overlays[0].frame, 'center');
-  assert.deepEqual(r.board.emphasis, ['automate']);
-  const gate = db.prepare("SELECT status FROM gates WHERE gate_type = 'plan_review' AND target_id = 1").get();
-  assert.equal(gate.status, 'pending');
-  db.close();
-});
-
-test('edit/preview refuse until the plan_review gate is approved', () => {
+test('edit/preview refuse until the snapshot plan is approved', () => {
   const db = freshDb();
   db.prepare("INSERT INTO content_items (title, status) VALUES ('Gate', 'shot')").run();
   attachFootage(db, 1);
-  const engine = new ProductionEngine(db);
-  engine.savePlan({
-    targetId: 1,
-    plan: { captions: {}, overlays: [], zooms: [], sfx: [] },
-  });
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  engine.saveSnapshotPlan({ targetId: 1, plan: SNAP_PLAN });
 
   const blocked = engine.edit({ targetId: 1 });
   assert.equal(blocked.processed, 0);
-  assert.equal(blocked.needsPlanReview, true);
-  assert.ok(blocked.board);
+  assert.equal(blocked.needsSnapshotPlan, true);
 
-  approveGateSync(db, 'plan_review', 1);
-  assert.equal(engine._planReviewApproved(1), true);
+  const prev = engine.preview({ targetId: 1 });
+  assert.equal(prev.processed, 0);
+  assert.equal(prev.needsSnapshotPlan, true);
+
+  approveGateSync(db, 'snapshot_plan_review', 1);
+  assert.equal(engine.snapshotPlanApproved(1), true);
+  cleanupComposition(1);
+  db.close();
+});
+
+// ============================================================================
+// ORIENTATION
+// ============================================================================
+
+test('_resolveOrientation: defaults to the footage orientation', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  assert.equal(engine._resolveOrientation({}, { width: 720, height: 1280 }), 'portrait');
+  assert.equal(engine._resolveOrientation({}, { width: 1920, height: 1080 }), 'landscape');
+  assert.equal(engine._resolveOrientation({}, { width: 0, height: 0 }), 'landscape');
+  db.close();
+});
+
+test('_resolveOrientation: a plan override wins over the source', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  assert.equal(engine._resolveOrientation({ output: { orientation: 'landscape' } }, { width: 720, height: 1280 }), 'landscape');
+  assert.equal(engine._resolveOrientation({ output: { orientation: 'portrait' } }, { width: 1920, height: 1080 }), 'portrait');
+  db.close();
+});
+
+test('_fitFor: contain only when the canvas differs from the source', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  assert.equal(engine._fitFor('portrait', { width: 720, height: 1280 }), 'cover');
+  assert.equal(engine._fitFor('landscape', { width: 1920, height: 1080 }), 'cover');
+  assert.equal(engine._fitFor('landscape', { width: 720, height: 1280 }), 'contain');
+  assert.equal(engine._fitFor('portrait', { width: 1920, height: 1080 }), 'contain');
+  db.close();
+});
+
+test('_renderDims: portrait footage picks the portrait canvas', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  const style = loadStyle();
+  const portrait = engine._renderDims(style, 'final', { width: 720, height: 1280 }, 'portrait');
+  assert.deepEqual([portrait.width, portrait.height], [1080, 1920]);
+  const landscape = engine._renderDims(style, 'final', { width: 1920, height: 1080 }, 'landscape');
+  assert.deepEqual([landscape.width, landscape.height], [1920, 1080]);
+  const prev = engine._renderDims(style, 'preview', { width: 720, height: 1280 }, 'portrait');
+  assert.deepEqual([prev.width, prev.height], [270, 480]);
   db.close();
 });
