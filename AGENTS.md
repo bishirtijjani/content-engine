@@ -18,8 +18,10 @@ what, and the exact rules that keep it working.
 A content automation engine for Bishir Tijjani (custom software & AI).
 It takes fresh ideas → scored picks → planned topics → researched → finished
 scripts → **ready to shoot**, then cleans the raw recording and turns it into a
-**finished, on-brand video** (long form + vertical shorts). Publishing lives
-downstream.
+**finished, on-brand video**. The master's orientation follows the footage:
+portrait footage makes a portrait (9:16) master, landscape makes landscape
+(16:9). A plan can override it with `output.orientation`. Other shapes are
+derived from the master. Publishing lives downstream.
 
 Architecture: deterministic engines ("muscle") + AI agent ("brain"), sharing
 one SQLite database (`data/content.db`). Zero npm runtime deps; `node:sqlite`.
@@ -134,10 +136,10 @@ npm run clean -- data/vid1 --apply    # cut, after the human approves
 ## Production (footage → finished video)
 
 The production engine turns one cleaned recording into a finished video. The
-human drops the cleaned file in `data/` and points at it; the agent writes a
-plan; the engine checks the plan against the locked style, builds one
-composition, renders it, lays sound effects under the voice, and asks the
-human to review.
+model is **Video → Segments → Beats**: the agent writes a segment plan (footage +
+snapshots); the engine derives the word-timed footage, validates the plan,
+renders one still per snapshot plus a contact sheet, and STOPS for the human. On
+approval it builds one composition, renders it, and lays sound under the voice.
 
 ```js
 import { connect } from '@content-os/core';
@@ -146,21 +148,25 @@ const engine = new ProductionEngine(connect());
 
 engine.listFootage();                          // what is waiting in data/
 engine.processFootage({ targetId, filePath }); // attach the cleaned file -> shot
-engine.edit({ targetId });                     // build + render from the plan -> editing
-engine.makeShort({ targetId, start, end });    // package a range as a 9:16 short
+engine.menu({ targetId });                     // read the menu FIRST
+engine.saveSnapshotPlan({ targetId, plan });   // store the segment plan
+await engine.planSnapshots({ targetId });      // derive + validate + render the plan, stop for approval
+engine.approveSnapshotPlan({ targetId });      // the human approves (in chat)
+engine.preview({ targetId });                  // fast low-res render while iterating
+engine.edit({ targetId });                     // build + render the final -> editing
 engine.requestReview({ targetId });            // ask the human to watch
 engine.schedule({ targetId });                 // after approval -> scheduled
 ```
 
-- `edit()` requires footage and an agent-written plan. No plan, or an off-style
-  plan, means it skips and logs why. The engine never writes content.
-- The engine never cuts footage. It only adds layers on top. Cleaning is the
+- The plan is **mandatory and gated**. `planSnapshots()` derives the narration
+  beats, validates the plan, renders the stills + contact sheet, opens
+  `snapshot_plan_review`, and stops. `preview()`/`edit()` refuse until the human
+  approves it (`approve_snapshot_plan`). No plan → no video.
+- The engine never writes content, and it never cuts footage. Cleaning is the
   `clean-recording` skill's job, and it happens before this.
 - `edit()` reuses the cleaner's transcript (`<video>.transcript.json`) for
-  captions instead of listening again, and renders at `output.crf` from the
-  style. Final size is predictable.
-- `make_short()` only packages a start/end the human and agent agreed on. The
-  agent suggests candidates; it does not decide.
+  captions and the word clock instead of listening again, and renders at
+  `output.crf` from the style. Final size is predictable.
 
 ### Rendering (required) — detached, never block the chat
 
@@ -210,150 +216,118 @@ it; it needs the agent to be reachable.
 `timeoutMs`, and the two canvases `preview` (640×360) and `final` (1920×1080).
 The engine owns these; HyperFrames never decides for us.
 
-### Plan contract
+### The plan contract — Video → Segments → Beats
 
-`content_items.video_plan` is structured JSON. Every field is optional; an
-empty plan is a plain captioned video. Three overlay kinds: `visual` (a file
-you supply), `graphic` (a template we draw), and `diagram` (a composed SVG
-layout). Every overlay carries a `why`.
+The video is an ordered list of SEGMENTS. A segment is either FOOTAGE (you
+talking — the face, no visuals) or a SNAPSHOT (a b-roll section on the orange
+backdrop, ONE completed composition built by its beats). You author the
+snapshots and any footage you want to force; the engine derives the rest of the
+footage word-accurately.
 
 ```json
-{ "captions": { "emphasis": ["automated", "30 seconds"] },
-  "overlays": [
-    { "start": 12, "end": 18, "kind": "graphic", "name": "stat-callout",
-      "why": "show the hours saved",
-      "fields": { "value": "8 hrs", "label": "saved per week" } },
-    { "start": 30, "end": 36, "kind": "visual", "frame": "full",
-      "file": "data/myvideo.visuals/dashboard.png",
-      "why": "show the real dashboard" } ],
-  "zooms": [ { "at": 12, "scale": 1.15 } ],
-  "sfx":   [ { "at": 12, "sound": "whoosh" } ] }
+{ "video": { "id": "vid", "duration": 86 },
+  "segments": [
+    { "id": "f1", "kind": "footage", "start": 0.1, "end": 4.5 },
+    { "id": "s3", "kind": "snapshot", "concept": "equation", "start": 26.3, "end": 42.5,
+      "composition": { "kicker": "The cost",
+        "terms":  [ { "value": "$25", "unit": "/hr", "label": "a person" } ],
+        "result": { "value": "$2,500", "unit": "/mo", "label": "of human time" } },
+      "beats": [
+        { "id": "b8",  "start": 26.3, "end": 28.4, "spoken": "Now let's put a cost on those hours.",
+          "action": { "op": "introduce", "target": ["head"] } },
+        { "id": "b10", "start": 29.2, "end": 36.5, "spoken": "…$25 an hour, that's roughly $2,500",
+          "action": { "op": "introduce", "target": ["term-0", "result"], "cue": { "term-0": "$25" } } }
+      ] }
+  ] }
 ```
 
-A **video** `visual` may select a region of its source with `sourceIn`/`sourceOut`
-(seconds into the clip), independent of where the overlay lands (`start`/`end`).
-At 1x playback the source length must equal the on-screen length; omitted, it
-plays from source 0 for the display duration. Images take no source fields.
+**Footage is derived, never placed by hand.** A snapshot is on screen only while
+its content builds and shows (its first body element → its last content word);
+every remaining stretch — a lead-in, a gap between snapshots, the hook, the tail
+— becomes footage, snapped to the narration words. A gap shorter than
+`footage.minGapSeconds` (3s) holds the previous scene (seamless b-roll); a
+snapshot shorter than `footage.minSnapshotSeconds` (2s) is held longer. The
+emitted plan lists every footage segment with the narration over it.
 
-`validatePlan()` refuses: wrong length, overlapping overlays, a visual or
-graphic not in the library, a field the graphic does not take, an unknown
-frame, an overlay with no purpose (or a filler purpose), too many zooms, a bad
-zoom scale, or a source length that does not match the on-screen length. The
-engine additionally refuses a visual whose file is not on disk, source fields on
-an image, or a source range past the end of the clip. Nothing renders if the
-plan fails.
+`validateSnapshotPlan()` refuses: an unknown concept, an empty composition, a
+beat with no `spoken`, a slot no beat introduces, a target that is not a slot of
+the concept, a beat past its segment window, a narration beat not covered by any
+segment, and — given the words — a slot cued on a phrase **not spoken inside its
+own beat**. Nothing renders if the plan fails.
 
-### Frames and modes (the model never sets a size or a position)
+The plan may set `output.orientation` (`"portrait"`/`"landscape"`) to override
+the master's shape; omit it to follow the footage.
 
-Every overlay snaps into one of four frames. A graphic gets its frame from the
-template; a visual picks one.
+### Beats and cues
 
-| Frame | Mode | What goes there |
+A beat names an `action.op` (`introduce`, `reveal`, `move`, `resize`, `restyle`,
+`retext`, `replace`, `highlight`, `hold`) and the slot(s) it acts on. A reveal
+lands on the exact narration word: a figure is cued automatically on the number
+it shows; otherwise set `action.cue` to the word/phrase (a string, or a
+`{slot: phrase}` map). A cue must be spoken inside that beat — so nothing appears
+on unrelated narration. Figures count up to their exact stated value. Every slot
+MUST be introduced by a beat: nothing shows before its narration.
+
+### The menu (read it before writing a plan)
+
+`engine.menu()` returns everything you are allowed to name: the brand doctrine,
+the segment model, the snapshot concepts + their slots, the beat actions and
+transitions, the cue rule, and the icon vocabulary.
+
+```js
+engine.menu({ targetId });
+```
+
+Snapshot concepts and their slots (`0..n` = one per array item). A beat's
+`action.target` must name these slots:
+
+| Concept | Slots | Use it for |
 |---|---|---|
-| `full` | take over | screenshots, screen recordings, diagrams, charts |
-| `center` | take over | big stat, quote, CTA, title, prompt |
-| `left` | split | a supporting visual or note; face on the right |
-| `right` | split | a supporting visual or button; face on the left |
-
-**Take over** hides the video and fills the frame on the orange. **Split**
-insets the video to the far side and puts the element in its frame. The rule:
-if they need to look at it, it takes the screen (`full` or `center`); if it
-only supports what is being said, it shares the screen (`left` or `right`).
-
-### The menu and the builder
-
-Before writing a plan, the model reads the menu:
-
-```js
-engine.menu({ targetId }); // frames, templates (name, fields, frame), this video's visuals, sound cues
-```
-
-Then it writes the plan with small functions, never raw JSON:
-
-```js
-const plan = engine.newPlan()
-  .caption({ emphasis: ['automated'] })
-  .graphic({ at: [12, 18], name: 'stat-callout', fields: { value: '8 hrs', label: 'saved' }, why: 'show the hours saved' })
-  .visual({ at: [30, 36], frame: 'full', file: 'data/myvideo.visuals/dashboard.png', why: 'show the real dashboard' })
-  .zoom({ at: 12, scale: 1.15 })
-  .sfx({ at: 12, sound: 'whoosh' });
-
-engine.savePlan({ targetId, plan }); // validates against the menu, then stores
-```
+| `title-steps` | head, headline, step-0..n | a short process / "how to" |
+| `equation` | head, term-0..n, result, note | a cost / math build |
+| `keypoint` | head, text, chip-0..n | one statement + chips |
+| `worksheet` | head, headline, header, row-0..n | a fill-in-the-blank form |
+| `decision` | head, question, branch-0..n | a yes/no test |
+| `bars` | head, headline, bar-0..n | a comparison |
+| `quote` | head, struck, text | a reframe |
+| `cta` | head, text, handle, sub | the closing ask |
 
 ### Doctrine (required)
 
-Everything on screen must earn its place. If you cannot say why it is there in
-one plain sentence, it does not go on screen. On-screen content is only:
-screenshots, screen recordings, your own video, graphics, diagrams. No stock
-footage. All of it sits on the burnt orange canvas; the orange shows around the
-edges. Visuals never enter the caption band. The rule lives in
-`config/style.json` under `doctrine`.
+Everything on screen must earn its place, and on-screen content must be
+narration-supported: never show a figure, label or term the speaker does not
+say. The rule lives in `config/style.json` under `doctrine`. For each narration
+beat, decide:
 
-The editorial rubric is in `config/style.json` under `doctrine.editorial` (the
-source of truth) and is returned by `engine.menu()`. Before writing a plan, for
-each narration beat answer these in order:
-
-1. Leave the face? Only when the visual gives more information, clarity,
-   emphasis or narrative value than staying on the face. If it does not
-   materially improve the communication, stay on the face.
-2. What type? real screen/UI or filmed action → `visual`; numbers, claims,
-   lists, takeaways, quotes, CTA, title → a `graphic` card; relationships,
-   processes, architecture → a `diagram`; a supporting note or button →
-   a `graphic` split card.
-3. Full or split? A graphic's frame comes from its template. A visual is `full`
-   when the viewer must inspect or read it, `left`/`right` when it only supports
-   what is said.
-4. Why? One sentence naming the value. The video must be worse without it.
-5. When? Enter on the words that need it, leave when they end. One at a time.
-6. Motion? Only for a hit: one emphasis word per caption, one zoom on a payoff,
-   at most one sfx cue per overlay. Default is still.
-7. Required or optional? Delete it in your head. If the explanation is still
+1. **Leave the face?** Only when a snapshot gives more information, clarity or
+   narrative value than staying on the face. If it does not materially improve
+   the communication, leave it to footage.
+2. **Which concept?** cost/math → `equation`; a short process → `title-steps`;
+   one statement → `keypoint`; a fill-in form → `worksheet`; a test → `decision`;
+   a comparison → `bars`; a reframe → `quote`; the close → `cta`.
+3. **Design the completed composition first**, then give every slot a beat that
+   reveals it on its word (the cue). Every slot must be introduced by a beat.
+4. **Motion?** Only for a hit: figures count up; a `highlight` pulses a payoff.
+   Default is still.
+5. **Required or optional?** Delete it in your head. If the explanation is still
    complete, it was optional — delete it.
 
 ### The locked style
 
-`packages/engine-production/config/style.json` is the ONE style file. How a
-video looks and sounds lives there: colors, fonts, captions, cards, frames,
-motion, sfx, grade, the backdrop pointer, and the voice rule. Per-video choices
-live in the plan, not here.
+`packages/engine-production/config/style.json` is the ONE style file: colors,
+fonts, captions, cards, the motion vocabulary, the footage/snapshot timing
+thresholds, grade, the backdrop pointer, and the voice rule. Per-video choices
+live in the plan, not here. The backdrop is a designed file,
+`packages/engine-production/backdrop/brand.svg`, the base layer of every
+snapshot. `brand.colors.bg` is the fallback color.
 
-The backdrop is a designed file: `packages/engine-production/backdrop/brand.svg`
-(a grid with depth). It is the base layer of every composition. The talking
-head is full-screen and covers it; the backdrop shows during take-over (the
-video is hidden) and split (the video is inset). Edit the one SVG to change the
-look; every future video follows. `brand.colors.bg` is the fallback color.
+### Icons
 
-### The library
-
-- **Visuals are per video.** They are not stockpiled. For a video `data/myvideo.mp4`,
-  `process_footage` makes the folder `data/myvideo.visuals/` next to it. Drop that
-  video's screenshots, screen recordings, and clips there, and point the plan's
-  `file` at them. A reusable id from the shared library (`asset`) also works.
-- `templates/` — on-brand graphics, drawn once and reused. The agent picks a
-  name and fills the fields; it never rewrites the graphic.
-  - cards: `stat-callout`, `key-point`, `text-box`, `quote-card`, `title-card`, `cta-card`
-  - lists: `step-list`, `checklist`
-  - prompts: `comment-prompt`, `link-prompt`, `callout`
-  - buttons: `subscribe-button`, `follow-button`
-  - people: `lower-third`
-- `src/diagrams/` — composed SVG diagrams (a node/connector/label/icon layer),
-  not static cards. The agent names a layout and passes a `spec`:
-  `{ kind: 'diagram', name: 'flow', spec: { title?, steps: [{ label, icon? }], active? }, why, start, end }`.
-  A diagram draws against the real frame box, so the same spec lays out
-  horizontally on a 16:9 long video and vertically on a 9:16 short, and it
-  animates (enter → staggered reveal → connector draw → active ring → exit).
-  Icons come from Tabler (MIT) — geometry is inlined at build time into
-  `src/diagrams/icons.generated.mjs` by `tools/build-icons.mjs`; runtime reads a
-  plain object, no dependency. `src/diagrams/icons.custom.mjs` is the empty
-  fallback for a concept Tabler does not cover. Rebuild with
-  `npm --workspace @content-os/engine-production run icons`.
-  Layouts: `flow`, `pipeline`, `cycle`, `timeline`, `before-after`, `comparison`,
-  `decision`, `hierarchy`, `architecture`, `relationship`, `layers`, `funnel`.
-  Builder: `engine.newPlan().diagram({ at, name, spec, why })`.
-- `assets/sfx/` — short sounds. These ARE reusable. Drop `.wav` files there and
-  run `npm --workspace @content-os/engine-production run catalog` once; the plan
-  refers to them by cue name (`whoosh`, `click`, ...) or id.
+Snapshots can carry icons from Tabler (MIT). Geometry is inlined at build time
+into `src/diagrams/icons.generated.mjs` by `tools/build-icons.mjs`; runtime reads
+a plain object, no dependency. `src/diagrams/icons.custom.mjs` is the empty
+fallback for a concept Tabler does not cover. Rebuild with
+`npm --workspace @content-os/engine-production run icons`.
 
 ### Voice (required)
 
@@ -433,10 +407,9 @@ Re-seed with `npm run seed` after editing `scripts/seed-*.mjs`.
 ## Commands
 
 ```
-npm test                                  # 167 tests — must stay green
+npm test                                  # 193 tests — must stay green
 npm run seed                              # brand + script + idea frameworks
 npm run clean -- data/vid1                # clean a recording (propose; --apply to cut)
-npm --workspace @content-os/engine-production run catalog   # rebuild assets/catalog.json
 npm --workspace @content-os/engine-production run icons     # rebuild diagrams/icons.generated.mjs (Tabler, MIT)
 node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <id>   # render script
 node --disable-warning=ExperimentalWarning scripts/reset-content.mjs       # purge placeholder content
