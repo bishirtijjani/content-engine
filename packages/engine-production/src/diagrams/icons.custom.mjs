@@ -5,8 +5,8 @@
 // empty on purpose: do not add an icon here unless a real diagram needs one and
 // no Tabler icon fits.
 //
-// Contract for any entry (must match the generated set so iconGroup() draws it
-// with no special casing):
+// Contract for any entry (must match the generated set so the engine icon
+// renderer draws it with no special casing — scene-graph.mjs iconSvg()):
 //   - a list of SVG path "d" strings on a 24x24 grid
 //   - stroke geometry only (the wrapper is stroke=currentColor, fill=none,
 //     stroke-width 2, round caps/joins — emitted by primitives.iconGroup())

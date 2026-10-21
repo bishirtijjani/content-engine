@@ -51,7 +51,7 @@ test('engine flow: save -> plan -> approve -> build', { skip: SKIP }, async () =
 
   const engine = new ProductionEngine(db, { dataDir });
   const plan = {
-    video: { id: 'e2e', duration: 6 },
+    video: { id: 'e2e', item: 1, duration: 6 },
     segments: [{
       id: 's1', kind: 'snapshot', concept: 'cta', frame: 'full', start: 0, end: 6,
       composition: { kicker: 'Start here', text: 'Do the math across your business.', handle: '@x' },

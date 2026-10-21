@@ -59,6 +59,22 @@ export function resolveStylePath(style, key) {
 }
 
 /**
+ * Resolve an asset reference to an absolute path, or null when it is not a real
+ * file. Tried as an absolute path, then relative to the package root, then the
+ * repo root. A `data:` URI is not a file, so it resolves to null. One resolver
+ * for every asset consumer (the backdrop, scene-graph image nodes).
+ */
+export function resolveAssetPath(src) {
+  if (!src || typeof src !== 'string' || src.startsWith('data:')) return null;
+  const candidates = [
+    path.isAbsolute(src) ? src : null,
+    path.resolve(PACKAGE_ROOT, src),
+    path.resolve(PACKAGE_ROOT, '..', '..', src),
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p) && fs.statSync(p).isFile()) ?? null;
+}
+
+/**
  * Read the designed backdrop SVG. Returns '' when there is none, so the
  * caller falls back to the flat brand color.
  * @param {Object} [style]
@@ -67,6 +83,6 @@ export function resolveStylePath(style, key) {
 export function loadBackdrop(style = null) {
   const rel = (style ?? loadStyle())?.backdrop?.file;
   if (!rel) return '';
-  const p = path.resolve(PACKAGE_ROOT, rel);
-  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  const p = resolveAssetPath(rel);
+  return p ? fs.readFileSync(p, 'utf8') : '';
 }

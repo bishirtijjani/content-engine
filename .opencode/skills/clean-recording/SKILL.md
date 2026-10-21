@@ -19,23 +19,24 @@ the same line.
 
 ## Input
 
-One folder, `data/<name>/`, containing:
+One folder, `data/item-<id>/` (the item's own folder — see `core/paths.js`),
+containing:
 
 - **one video** — the camera file, with its own scratch audio (the anchor for sync)
 - **one audio** — the separate high-quality recording
 - **`script.txt`** — the script, one line per line-as-read (the spine)
 
 When the item came from the content engine, `ready()` already made this folder
-as `data/vid<id>/` and wrote `script.txt` from the approved script. Record by
+as `data/item-<id>/` and wrote `script.txt` from the approved script. Record by
 reading that file, then drop the camera video and the audio into it.
 
 ## The loop
 
 ```bash
-npm run clean -- data/vid1           # propose: cut list + read + review file
-# read data/vid1/vid1.read.txt, edit data/vid1/vid1.review.json
-npm run clean -- data/vid1           # re-run until the read is clean
-npm run clean -- data/vid1 --apply   # render the cleaned video
+npm run clean -- data/item-1           # propose: cut list + read + review file
+# read data/item-1/item-1.read.txt, edit data/item-1/item-1.review.json
+npm run clean -- data/item-1           # re-run until the read is clean
+npm run clean -- data/item-1 --apply   # render the cleaned video
 ```
 
 `--realign` ignores the cached alignment. `--model small.en` uses a bigger
@@ -103,15 +104,18 @@ Decisions, trimmed windows, and hand cuts are preserved across re-runs.
 
 ## Output
 
-`data/<name>/<name>.cleaned.mp4` plus `<name>.cleaned.transcript.json`. The
-`aligned.wav` is kept so re-runs stay fast — do not delete the sidecars. Hand
-the clean to the production engine:
+`data/<folder>/<name>.cleaned.mp4` plus `<name>.cleaned.transcript.json` (so an
+item writes `data/item-1/item-1.cleaned.mp4`). The `aligned.wav` is kept so
+re-runs stay fast — do not delete the sidecars. Hand the clean to the production
+engine:
 
 ```js
-engine.processFootage({ targetId, filePath: 'data/vid1/vid1.cleaned.mp4' });
+engine.processFootage({ targetId, filePath: 'data/item-1/item-1.cleaned.mp4' });
 ```
 
-`edit()` reuses `<name>.cleaned.transcript.json` for captions.
+`process_footage` adopts the file into `data/item-<id>/source.mp4` (hardlinked,
+so the original is untouched) and records that path — hand it whatever the
+cleaner wrote. `edit()` reuses `<name>.cleaned.transcript.json` for captions.
 
 ## Tuning (in `config/style.json` → `clean`)
 

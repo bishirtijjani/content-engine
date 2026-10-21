@@ -323,7 +323,7 @@
     "assets": "assets",
     "templates": "templates",
     "input": "data",
-    "compositions": "data/compositions",
+    "items": "data/item-<id>",
     "renders": "data/renders"
   },
 

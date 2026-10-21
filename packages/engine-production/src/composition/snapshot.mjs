@@ -16,8 +16,12 @@
 // the video's timeline hides slots at t=0 and reveals them on their beats.
 import { safeBox } from './layout.mjs';
 import { cardBlock, surfaceText, esc } from './primitives.mjs';
+import { sceneGraphToHtml } from './scene-graph.mjs';
 import { loadBackdrop } from '../style.mjs';
 import { renderCaptionCSS } from '../build-captions.mjs';
+
+// The one CSS a scene-graph scene needs (its nodes carry their own inline styles).
+const SG_CSS = '.cx-sg{position:absolute;box-sizing:border-box;}';
 
 const FONT = {
   display: 'var(--brand-display)',
@@ -274,11 +278,24 @@ export function composeSnapshot(snapshot, opts) {
 }
 
 /**
+ * Render one snapshot's completed composition to { html, css } — the ONE entry
+ * point for both the still and the video. A scene-graph snapshot renders through
+ * the generic scene-graph renderer (no concept/recipe); a concept snapshot renders
+ * through its recipe. Both return slot-tagged HTML on the fixed design canvas.
+ */
+export function renderSnapshotHtml(snapshot, { style, width, height, orientation = 'portrait' } = {}) {
+  if (snapshot?.sceneGraph) {
+    return { html: sceneGraphToHtml(snapshot.sceneGraph, { width, height, orientation, style }), css: SG_CSS };
+  }
+  return renderSnapshotScene(snapshot, { style, width, height, orientation });
+}
+
+/**
  * A full standalone page for a snapshot still (backdrop + completed composition
  * + optional caption band), using the SAME caption CSS the engine renders.
  */
 export function composeSnapshotHTML({ snapshot, caption = '', style, width = 1080, height = 1920, orientation = 'portrait' }) {
-  const { html, css } = renderSnapshotScene(snapshot, { style, width, height, orientation });
+  const { html, css } = renderSnapshotHtml(snapshot, { style, width, height, orientation });
   const backdrop = loadBackdrop(style);
   const capCss = renderCaptionCSS(style, width, orientation);
   const capHtml = caption ? `<div class="cap"><div class="cap-inner">${caption}</div></div>` : '';

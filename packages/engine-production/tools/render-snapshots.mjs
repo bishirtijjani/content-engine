@@ -21,11 +21,14 @@ const { deriveNarrationBeats } = await import(path.join(PKG_ROOT, 'src', 'compos
 const { validateSnapshotPlan } = await import(path.join(PKG_ROOT, 'src', 'composition', 'snapshot-spec.mjs'));
 const { buildSnapshotComposition } = await import(path.join(PKG_ROOT, 'src', 'composition', 'timeline.mjs'));
 const { buildScriptWords } = await import(path.join(PKG_ROOT, 'src', 'script-captions.mjs'));
+const { resolvePlanTarget, itemArgv } = await import(path.join(PKG_ROOT, 'tools', 'lib', 'item-dir.mjs'));
+const { linkOrCopy, pruneRenderScratch } = await import(path.join(REPO, 'packages', 'core', 'src', 'paths.js'));
 
-const planPath = process.argv[2];
-const final = process.argv.includes('--final');
+const argv = process.argv.slice(2);
+const planPath = argv.find((a) => !a.startsWith('--'));
+const final = argv.includes('--final');
 if (!planPath) {
-  console.error('usage: node tools/render-snapshots.mjs <plan.json> [--final]');
+  console.error('usage: node tools/render-snapshots.mjs <plan.json> [--final] [--item <content_items.id>]');
   process.exit(2);
 }
 const absPlan = path.isAbsolute(planPath) ? planPath : path.join(REPO, planPath);
@@ -36,7 +39,16 @@ if (!fs.existsSync(absPlan)) {
 const plan = JSON.parse(fs.readFileSync(absPlan, 'utf8'));
 const v = plan.video ?? {};
 const style = loadStyle();
-const read = (rel) => (rel ? fs.readFileSync(path.join(REPO, rel), 'utf8') : null);
+const read = (rel) => (rel ? fs.readFileSync(path.isAbsolute(rel) ? rel : path.join(REPO, rel), 'utf8') : null);
+
+// The item's id decides the folder — never the plan's free-text video.id.
+let target;
+try {
+  target = resolvePlanTarget({ plan, argvItem: itemArgv(argv) });
+} catch (err) {
+  console.error(`PLAN FAILED — ${err.message}`);
+  process.exit(1);
+}
 
 const orientation = v.orientation ?? 'portrait';
 const mode = final ? 'final' : 'preview';
@@ -59,10 +71,12 @@ if (problems.length) {
 }
 
 // The a-roll + the words, in the composition dir (next to the plan folder).
-const dir = path.join(REPO, v.planDir ? path.dirname(v.planDir) : `data/compositions/${v.id ?? 'video'}`);
+// The a-roll + the words, in the item's production folder (next to the plan).
+const dir = target.paths.assertInsideData(target.productionDir);
 fs.mkdirSync(dir, { recursive: true });
 const srcName = `source${path.extname(v.footage)}`;
-if (!fs.existsSync(path.join(dir, srcName))) fs.copyFileSync(path.join(REPO, v.footage), path.join(dir, srcName));
+const srcAbs = path.isAbsolute(v.footage) ? v.footage : path.join(REPO, v.footage);
+if (!fs.existsSync(path.join(dir, srcName))) linkOrCopy(srcAbs, path.join(dir, srcName));
 const built = buildSnapshotComposition({
   plan, words, videoSrc: srcName, width: canvas.width, height: canvas.height,
   duration: v.duration, style, orientation, fps: canvas.fps ?? 24,
@@ -76,7 +90,10 @@ if (!env.HYPERFRAMES_BROWSER_PATH) {
   if (fs.existsSync(chrome)) env.HYPERFRAMES_BROWSER_PATH = chrome;
 }
 const r = style?.render ?? {};
-const args = ['--disable-warning=ExperimentalWarning', HYPERFRAMES_BIN, 'render', dir, '-o', path.join(dir, `out.${mode}.mp4`)];
+// Finished videos go to data/renders/ like every other render — never beside
+// the composition (data/renders/item-<id>[.preview].mp4).
+const outputPath = target.paths.assertInsideData(target.renderPath(mode));
+const args = ['--disable-warning=ExperimentalWarning', HYPERFRAMES_BIN, 'render', dir, '-o', outputPath];
 if (style?.output?.crf != null) args.push('--crf', String(style.output.crf));
 const workers = process.env.SNAP_WORKERS ? Number(process.env.SNAP_WORKERS) : r.workers;
 if (workers != null) args.push('-w', String(workers));
@@ -95,7 +112,5 @@ const res = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: r.tim
 if (res.error) { console.error(`RENDER FAILED — ${res.error.message}`); process.exit(1); }
 if (res.status !== 0) { console.error(`RENDER FAILED — exit ${res.status}\n${(res.stderr ?? '').slice(-2000)}`); process.exit(1); }
 // HyperFrames leaves scratch work dirs behind on the way out.
-for (const entry of fs.readdirSync(dir)) {
-  if (entry.startsWith('work-')) fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
-}
-console.log(`render OK → ${path.join(dir, `out.${mode}.mp4`)}`);
+pruneRenderScratch(dir);
+console.log(`render OK → ${outputPath}`);

@@ -50,16 +50,22 @@ export async function renderSnapshotStills({ snapshots, style, outDir, htmlDir =
       await page.evaluate(() => document.fonts.ready);
       await new Promise((r) => setTimeout(r, 200));
       const fit = await page.evaluate(() => {
-        const stage = document.querySelector('.cx-stage').getBoundingClientRect();
-        // Every descendant must stay inside the safe box — the whole content, not
+        // A concept snapshot draws inside the safe box (`.cx-stage`); a scene graph
+        // draws on the full design canvas (`.cx-sg-scale`). Same check either way:
+        // every descendant must stay inside its stage's box.
+        const stageEl = document.querySelector('.cx-stage, .cx-sg-scale');
+        if (!stageEl) return { fits: true, offenders: [] };
+        const stage = stageEl.getBoundingClientRect();
+        const nodes = [...stageEl.querySelectorAll('*')];
+        // Every descendant must stay inside the stage's box — the whole content, not
         // just the top-level blocks (a padded card used to spill past the box).
-        const descendants = [...document.querySelectorAll('.cx-stage *')].map((el) => el.getBoundingClientRect());
+        const descendants = nodes.map((el) => el.getBoundingClientRect());
         const boxes = descendants.length ? descendants : [stage];
         const top = Math.min(...boxes.map((k) => k.top));
         const bottom = Math.max(...boxes.map((k) => k.bottom));
         const left = Math.min(...boxes.map((k) => k.left));
         const right = Math.max(...boxes.map((k) => k.right));
-        const offenders = [...document.querySelectorAll('.cx-stage *')]
+        const offenders = nodes
           .filter((el) => {
             const r = el.getBoundingClientRect();
             return r.right > stage.right + 1 || r.left < stage.left - 1 || r.bottom > stage.bottom + 1 || r.top < stage.top - 1;

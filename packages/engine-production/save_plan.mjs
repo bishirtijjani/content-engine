@@ -1,0 +1,10 @@
+import fs from "fs";
+import { initDb } from "@content-os/core";
+import { ProductionEngine } from "/opt/docker/apps/content-os/repo/packages/engine-production/src/index.js";
+const db = initDb("/opt/docker/apps/content-os/repo/data/content.db");
+const planJson = fs.readFileSync("/opt/docker/apps/content-os/repo/data/compositions/item-2/snapshots.plan.json", "utf8");
+const eng = new ProductionEngine(db);
+eng.saveSnapshotPlan({targetId: 2, plan: planJson});
+console.log("saved snapshot plan");
+const r = eng.edit({targetId:2});
+console.log("edit result:", JSON.stringify(r));

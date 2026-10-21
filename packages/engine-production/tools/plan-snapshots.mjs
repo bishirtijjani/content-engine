@@ -17,10 +17,12 @@ const REPO = path.resolve(PKG_ROOT, '..', '..');
 
 const { loadStyle } = await import(path.join(PKG_ROOT, 'src', 'style.mjs'));
 const { planVideo } = await import(path.join(PKG_ROOT, 'src', 'composition', 'snapshot-plan.mjs'));
+const { resolvePlanTarget, itemArgv } = await import(path.join(PKG_ROOT, 'tools', 'lib', 'item-dir.mjs'));
 
-const planPath = process.argv[2];
+const argv = process.argv.slice(2);
+const planPath = argv.find((a) => !a.startsWith('--'));
 if (!planPath) {
-  console.error('usage: node tools/plan-snapshots.mjs <plan.json>');
+  console.error('usage: node tools/plan-snapshots.mjs <plan.json> [--item <content_items.id>]');
   process.exit(2);
 }
 const absPlan = path.isAbsolute(planPath) ? planPath : path.join(REPO, planPath);
@@ -33,7 +35,15 @@ const style = loadStyle();
 const v = plan.video ?? {};
 const read = (rel) => (rel ? fs.readFileSync(path.join(REPO, rel), 'utf8') : null);
 
-const outDir = path.join(REPO, v.planDir ?? `data/compositions/${v.id ?? 'video'}/plan`);
+// The item's id decides the folder — never the plan's free-text video.id.
+let target;
+try {
+  target = resolvePlanTarget({ plan, argvItem: itemArgv(argv) });
+} catch (err) {
+  console.error(`PLAN FAILED — ${err.message}`);
+  process.exit(1);
+}
+const outDir = target.paths.assertInsideData(target.planDir);
 const htmlDir = path.join(outDir, 'html');
 
 let result;

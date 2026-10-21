@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // clean.mjs — turn a folder of raw footage into one cleaned video.
 //
-//   data/vid1/  one video (with its own scratch audio) + one high-quality audio
+//   data/item-1/  the item's folder: one video (with its own scratch audio),
+//                 one high-quality audio, script.txt
 //
 //   1. align    sample-accurate offset + drift between the two (align.py)
 //   2. place    build the aligned recording on the video's timeline (place.py)
@@ -11,11 +12,12 @@
 //   5. apply    --apply cuts the picture and audio in one pass
 //
 // The engine never cuts. This tool proposes; the human approves.
+// Everything it writes stays in the folder it was given (see core/paths.js).
 //
 // Usage:
-//   node tools/clean/clean.mjs data/vid1            # propose (print the cut list)
-//   node tools/clean/clean.mjs data/vid1 --apply    # cut
-//   ... --realign                                   # ignore the cached alignment
+//   node tools/clean/clean.mjs data/item-1            # propose (print the cut list)
+//   node tools/clean/clean.mjs data/item-1 --apply    # cut
+//   ... --realign                                     # ignore the cached alignment
 
 import { spawnSync } from 'node:child_process';
 import {
@@ -236,7 +238,8 @@ function printWarnings(warnings) {
 
 function main() {
   const { pos, flags, opts } = parseArgs(process.argv.slice(2));
-  const folderArg = pos[0] ?? 'data/vid1';
+  const folderArg = pos[0];
+  if (!folderArg) die('usage: node tools/clean/clean.mjs <folder> [--apply] [--realign]  (e.g. data/item-1)');
   const folder = path.resolve(process.cwd(), folderArg);
   if (!existsSync(folder)) die(`folder not found: ${folder}`);
   const base = path.basename(folder);

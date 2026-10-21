@@ -7,4 +7,5 @@ export * from './db.js';
 export * from './state.js';
 export * from './gates.js';
 export * from './models.js';
+export * from './paths.js';
 export { BaseEngine } from './engines/base.js';

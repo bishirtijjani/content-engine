@@ -25,6 +25,21 @@ export function motionCfg(style) {
     stagger: m.stagger ?? 0.1,
     highlight: { scale: m.highlight?.scale ?? 1.06, duration: m.highlight?.duration ?? 0.5 },
     countUp: m.countUp ?? 0.9,
+    draw: m.draw ?? 0.7,
+    pulse: { min: m.pulse?.min ?? 0.3, duration: m.pulse?.duration ?? 0.7 },
+  };
+}
+
+const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+
+/** A transform offset ({dx,dy,scale}) with defaults — the shared geometry of a
+ *  reposition/reveal, so every scene reuses one vocabulary (never per-composition). */
+function offset(o, fallback = { dx: 0, dy: 0, scale: 1 }) {
+  const src = o && typeof o === 'object' ? o : {};
+  return {
+    dx: isNum(src.dx) ? src.dx : fallback.dx,
+    dy: isNum(src.dy) ? src.dy : fallback.dy,
+    scale: isNum(src.scale) ? src.scale : fallback.scale,
   };
 }
 
@@ -32,7 +47,7 @@ export function motionCfg(style) {
  * The GSAP lines a beat contributes.
  * @returns {{ lines: string[], counts: Array<{sel:string, at:number, dur:number}> }}
  */
-export function beatLines(beat, { sceneSel, style, segment = null, words = null }) {
+export function beatLines(beat, { sceneSel, style, segment = null, words = null } = {}) {
   const cfg = motionCfg(style);
   const op = beat?.action?.op ?? 'introduce';
   if (op === 'hold') return { lines: [], counts: [] };
@@ -47,6 +62,9 @@ export function beatLines(beat, { sceneSel, style, segment = null, words = null 
   const counts = [];
 
   slots.forEach((slot, i) => {
+    // One canonical selector: every revealable slot carries `data-slot`, in a
+    // concept composition and in a scene graph alike (the scene graph also carries
+    // `data-sg` for identity, but motion never needs it).
     const sel = `${sceneSel} [data-slot='${slot}']`;
     // Land the reveal on the exact narration word: an explicit cue wins, then a
     // figure's own number, then the beat's start (+ stagger).
@@ -61,14 +79,42 @@ export function beatLines(beat, { sceneSel, style, segment = null, words = null 
     if (t == null) t = r3(at + i * cfg.stagger);
     // The scene only exists from its start — a lead-in reveal rides the scene start.
     if (segment && t < segment.start) t = r3(segment.start);
+    const action = beat?.action ?? {};
     if (op === 'introduce' || op === 'reveal') {
-      lines.push(`tl.set("${sel}", {opacity:0, y:${cfg.rise}}, ${at});`);
-      lines.push(`tl.to("${sel}", {opacity:1, y:0, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      // An explicit `from` places the slot at a start offset (a hero figure big
+      // and centred, say) and leaves it there; a later `move` settles it. Without
+      // one the reveal is the usual rise-in.
+      if (action.from) {
+        const f = offset(action.from, { dx: 0, dy: cfg.rise, scale: 1 });
+        lines.push(`tl.set("${sel}", {opacity:0, x:${r3(f.dx)}, y:${r3(f.dy)}, scale:${r3(f.scale)}, transformOrigin:'50% 50%'}, ${at});`);
+        lines.push(`tl.to("${sel}", {opacity:1, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      } else {
+        lines.push(`tl.set("${sel}", {opacity:0, y:${cfg.rise}}, ${at});`);
+        lines.push(`tl.to("${sel}", {opacity:1, y:0, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      }
       counts.push({ sel, at: t, dur: cfg.countUp });
     } else if (op === 'move') {
-      lines.push(`tl.fromTo("${sel}", {y:${cfg.rise}}, {y:0, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      // Reposition: settle a slot from an offset to its final place (identity by
+      // default), or rise it into place when no geometry is given.
+      const to = offset(action.to);
+      if (action.from) {
+        const f = offset(action.from);
+        lines.push(`tl.fromTo("${sel}", {x:${r3(f.dx)}, y:${r3(f.dy)}, scale:${r3(f.scale)}, transformOrigin:'50% 50%'}, ` +
+          `{x:${r3(to.dx)}, y:${r3(to.dy)}, scale:${r3(to.scale)}, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      } else {
+        lines.push(`tl.to("${sel}", {x:${r3(to.dx)}, y:${r3(to.dy)}, scale:${r3(to.scale)}, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+      }
     } else if (op === 'resize') {
       lines.push(`tl.fromTo("${sel}", {scale:0.92}, {scale:1, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
+    } else if (op === 'draw') {
+      // Path-drawing: an SVG stroke draws itself, a rule grows from the left.
+      const d = action.duration ?? cfg.draw;
+      lines.push(`tl.set("${sel}", {opacity:1, y:0}, ${at});`);
+      lines.push(`__draw("${sel}", ${t}, ${r3(d)});`);
+    } else if (op === 'pulse') {
+      const p = cfg.pulse;
+      const d = action.duration ?? p.duration;
+      lines.push(`tl.to("${sel}", {opacity:${p.min}, duration:${r3(d / 2)}, ease:"power1.inOut", yoyo:true, repeat:1}, ${at});`);
     } else if (op === 'highlight') {
       const h = cfg.highlight;
       lines.push(`tl.fromTo("${sel}", {scale:1}, {scale:${h.scale}, duration:${r3(h.duration / 2)}, ease:"power2.out"}, ${at});`);
@@ -126,5 +172,29 @@ export function countUpHelper() {
         el.textContent = __fmt(0, fmt);
         tl.to(o, { v: to, duration: dur, ease: 'power2.out', onUpdate: function(){ el.textContent = __fmt(o.v, fmt); } }, at);
         tl.set(el, {}, at + dur);
+      }`;
+}
+
+/**
+ * The one-time helper for the `draw` op. A slot holding an SVG path draws its
+ * stroke on (stroke-dashoffset); any other slot grows in from the left edge
+ * (scaleX). Generic — the same helper serves a rule, a leader line or an icon.
+ */
+export function drawHelper() {
+  return `      function __draw(root, at, dur){
+        const el = document.querySelector(root);
+        if (!el) return;
+        const p = el.querySelector('path');
+        if (p && p.getTotalLength) {
+          let len = 0;
+          try { len = p.getTotalLength(); } catch (e) { len = 0; }
+          if (!len) len = 100;
+          p.style.strokeDasharray = len;
+          p.style.strokeDashoffset = len;
+          tl.to(p, { strokeDashoffset: 0, duration: dur, ease: 'power1.inOut' }, at);
+        } else {
+          tl.fromTo(el, { scaleX: 0, transformOrigin: '0% 50%' },
+            { scaleX: 1, transformOrigin: '0% 50%', duration: dur, ease: 'power1.inOut' }, at);
+        }
       }`;
 }

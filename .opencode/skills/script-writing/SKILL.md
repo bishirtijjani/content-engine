@@ -115,10 +115,10 @@ Opens http://127.0.0.1:3847 — show it to the human for the script_review
 decision. If rejected: edit the script, then `engine.resubmit({ targetId })`.
 If approved: `engine.ready()` → item lands in `ready_to_shoot`.
 
-`ready()` also creates the shoot folder `data/vid<id>/` and writes
+`ready()` also creates the item's folder `data/item-<id>/` and writes
 `script.txt` there — the spoken lines, one per line, from the approved script
 (hook, then script, then cta). That file is the spine of the clean. Tell the
-human: **record by reading `data/vid<id>/script.txt`, then drop the camera
+human: **record by reading `data/item-<id>/script.txt`, then drop the camera
 video and the separate audio recording into that same folder.**
 
 ## Windows / environment gotchas

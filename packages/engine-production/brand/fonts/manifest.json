@@ -1,0 +1,20 @@
+{
+  "Montserrat": {
+    "600": "Montserrat-600.woff2",
+    "700": "Montserrat-700.woff2",
+    "800": "Montserrat-800.woff2",
+    "900": "Montserrat-900.woff2"
+  },
+  "Plus Jakarta Sans": {
+    "500": "PlusJakarta-500.woff2",
+    "600": "PlusJakarta-600.woff2",
+    "700": "PlusJakarta-700.woff2",
+    "800": "PlusJakarta-800.woff2"
+  },
+  "JetBrains Mono": {
+    "500": "JetBrainsMono-500.woff2",
+    "600": "JetBrainsMono-600.woff2",
+    "700": "JetBrainsMono-700.woff2",
+    "800": "JetBrainsMono-800.woff2"
+  }
+}

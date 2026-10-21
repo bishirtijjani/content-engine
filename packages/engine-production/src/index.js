@@ -32,7 +32,7 @@
 //   resubmit               ask again after the human rejected it
 //   schedule               move forward after the human approved
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, existsSync, readFileSync, copyFileSync, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   BaseEngine,
@@ -42,6 +42,9 @@ import {
   decideGate,
   latestPending,
   contentItem,
+  makePaths,
+  pruneRenderScratch,
+  linkOrCopy,
 } from '@content-os/core';
 import { mixSfx } from './mix.mjs';
 import { buildMenu } from './menu.mjs';
@@ -90,14 +93,14 @@ export class ProductionEngine extends BaseEngine {
   constructor(db, { dataDir = null } = {}) {
     super(db);
     this.dataDir = dataDir ? path.resolve(dataDir) : DATA_DIR;
+    // Every path this engine writes comes from here — one layout, one owner,
+    // legacy-aware so an item mid-review never has to move (core/paths.js).
+    this.paths = makePaths(this.dataDir);
   }
 
-  get compositionsDir() {
-    return path.join(this.dataDir, 'compositions');
-  }
-
+  /** Finished videos + detached render logs. */
   get rendersDir() {
-    return path.join(this.dataDir, 'renders');
+    return this.paths.rendersDir();
   }
 
   // =========================================================================
@@ -130,24 +133,29 @@ export class ProductionEngine extends BaseEngine {
     }
 
     let resolved = null;
+    let adopted = null;
     if (filePath) {
       resolved = this._resolveFootagePath(filePath);
       if (!resolved) {
         throw new Error(`footage not found: ${filePath} (looked in data/ and the repo root)`);
       }
+      // Give the file a home in data/item-<id>/ BEFORE it becomes the item's
+      // recording, so recordings.file_path can never point at a hand-typed
+      // folder again (see _adoptFootage).
+      adopted = this._adoptFootage(item, resolved, dryRun);
     }
 
     if (dryRun) {
       this.log('process_footage', {
         targetType: 'content_item', targetId: item.id,
-        message: `would attach ${resolved ?? `${recordingIds.length} recording(s)`} and move to 'shot' (dry run)`,
+        message: `would attach ${adopted ?? `${recordingIds.length} recording(s)`} and move to 'shot' (dry run)`,
       });
-      return { processed: 1, skipped: 0, path: resolved ?? undefined };
+      return { processed: 1, skipped: 0, path: adopted ?? undefined };
     }
 
     let recordingId = null;
-    if (resolved) {
-      recordingId = this._attachFootage(item, resolved);
+    if (adopted) {
+      recordingId = this._attachFootage(item, adopted);
     } else {
       for (const recId of recordingIds) {
         this.db.prepare(
@@ -159,36 +167,75 @@ export class ProductionEngine extends BaseEngine {
     if (item.status !== 'shot') {
       transition(this.db, item.id, 'shot', {
         actor: `engine:${this.name}`,
-        reason: resolved ? 'cleaned footage attached' : `${recordingIds.length} recording(s) linked`,
+        reason: adopted ? 'cleaned footage attached' : `${recordingIds.length} recording(s) linked`,
       });
     }
 
     this.log('process_footage', {
       targetType: 'content_item', targetId: item.id,
-      message: resolved
-        ? `attached ${path.basename(resolved)}`
+      message: adopted
+        ? (resolved === adopted
+            ? `attached ${path.basename(adopted)}`
+            : `attached ${path.basename(resolved)} → ${this.paths.relative(adopted)}`)
         : `attached ${recordingId ?? 'footage'}, moved to 'shot'`,
     });
-    return { processed: 1, skipped: 0, recordingId: recordingId ?? undefined, path: resolved ?? undefined };
+    return { processed: 1, skipped: 0, recordingId: recordingId ?? undefined, path: adopted ?? undefined };
+  }
+
+  /**
+   * Put the footage in the item's own folder before it is recorded as the
+   * item's recording: `data/item-<id>/source<ext>` (hardlinked, so the file the
+   * human dropped elsewhere costs no extra bytes and is never touched).
+   *
+   * Refuses renders (a finished video is not footage), never renames over a
+   * different file, and leaves a pre-migration item's legacy tree alone so an
+   * item under human review does not move mid-flight.
+   *
+   * @param {object} item
+   * @param {string} videoPath absolute path of the file to adopt
+   * @param {boolean} [dryRun] plan the destination without writing it
+   * @returns {string} the path to record as the footage
+   */
+  _adoptFootage(item, videoPath, dryRun = false) {
+    const itemDir = this.paths.resolveItemDir(item.id);
+    if (this.paths.isInside(itemDir, videoPath)) return videoPath;
+    if (this.paths.isLegacyDir(itemDir)) {
+      // Still in the old tree (its item is mid-review) — don't create the new
+      // folder from underneath it; migration moves this item as a whole later.
+      return videoPath;
+    }
+    if (this.paths.isInside(this.paths.rendersDir(), videoPath)) {
+      throw new Error(`refusing to attach a render as footage: ${videoPath} — attach the cleaned recording, not a finished video`);
+    }
+
+    const ext = path.extname(videoPath);
+    const preferred = path.join(itemDir, `source${ext}`);
+    const name = existsSync(preferred) ? path.basename(videoPath) : `source${ext}`;
+    if (dryRun) return path.join(itemDir, name);
+    return this.paths.adopt(videoPath, item.id, { name }).path;
   }
 
   /** List the video files waiting in data/ so the agent can offer them. */
   listFootage() {
-    if (!existsSync(DATA_DIR)) return { files: [] };
+    const root = this.paths.data;
+    if (!existsSync(root)) return { files: [] };
     const files = [];
     const walk = (dir, depth = 0) => {
       if (depth > 2) return;
       for (const entry of this._readdir(dir)) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          if (entry.name === 'compositions' || entry.name === 'renders') continue;
+          // compositions = pre-migration work (its footage is already attached),
+          // renders = finished videos, tmp = scratch, production = the item's own
+          // build folder (its source.mp4 is a hardlink, not another drop).
+          if (['compositions', 'renders', 'tmp', 'production'].includes(entry.name)) continue;
           walk(full, depth + 1);
         } else if (VIDEO_EXT.has(path.extname(entry.name).toLowerCase())) {
           files.push({ name: entry.name, path: path.relative(PROJECT_ROOT, full).split(path.sep).join('/') });
         }
       }
     };
-    walk(DATA_DIR);
+    walk(root);
     return { files: files.sort((a, b) => a.name.localeCompare(b.name)) };
   }
 
@@ -223,9 +270,13 @@ export class ProductionEngine extends BaseEngine {
   // be built.
   // =========================================================================
 
-  /** The on-disk project folder for an item's composition work. */
+  /**
+   * The on-disk folder for an item's production work: `data/item-<id>/production`
+   * in the new tree, or the pre-migration `data/compositions/item-<id>` until that
+   * item is moved. The item's id decides the name — never a free-text plan id.
+   */
   _compositionDir(itemId) {
-    return path.join(this.compositionsDir, `item-${itemId}`);
+    return this.paths.resolveProductionDir(itemId);
   }
 
   /** Where the agent-written snapshot plan input lives for an item. */
@@ -279,7 +330,11 @@ export class ProductionEngine extends BaseEngine {
     }
     mkdirSync(this._compositionDir(item.id), { recursive: true });
     const abs = this._snapshotPlanInput(item.id);
-    writeFileSync(abs, JSON.stringify(raw, null, 2) + '\n', 'utf8');
+    // Stamp the item's id into the plan: where this plan's stills and renders
+    // land is decided by content_items.id, never by a free-text video.id (which
+    // is how data/compositions/{video,sg-smoke,agent-loop,...} got minted).
+    const stamped = { ...raw, video: { ...(raw.video ?? {}), item: item.id } };
+    writeFileSync(abs, `${JSON.stringify(stamped, null, 2)}\n`, 'utf8');
     this.log('save_snapshot_plan', { targetType: 'content_item', targetId: item.id, message: 'snapshot plan saved' });
     return { saved: true, path: abs };
   }
@@ -383,7 +438,7 @@ export class ProductionEngine extends BaseEngine {
     const duration = probe.duration ?? item.desired_length_seconds ?? 60;
     const orientation = this._resolveOrientation(null, probe);
     const fit = this._fitFor(orientation, probe);
-    const compositionDir = path.join(this.compositionsDir, `item-${item.id}`);
+    const compositionDir = this._compositionDir(item.id);
 
     // Re-run the full gates (narration cue/coverage included) at build time.
     const narration = this._narrationFor(item, compositionDir, videoPath);
@@ -414,7 +469,7 @@ export class ProductionEngine extends BaseEngine {
     writeFileSync(path.join(compositionDir, 'index.html'), html, 'utf8');
 
     mkdirSync(this.rendersDir, { recursive: true });
-    const outputPath = path.join(this.rendersDir, `item-${item.id}.preview.mp4`);
+    const outputPath = this.paths.renderPath(item.id, 'preview');
     const render = this._renderComposition(compositionDir, outputPath, style, 'preview', orientation);
     if (!render.success) {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'error', message: `render failed: ${render.error}` });
@@ -473,7 +528,7 @@ export class ProductionEngine extends BaseEngine {
     const orientation = this._resolveOrientation(null, probe);
     const fit = this._fitFor(orientation, probe);
     const dims = this._renderDims(style, 'final', probe, orientation);
-    const compositionDir = path.join(this.compositionsDir, `item-${item.id}`);
+    const compositionDir = this._compositionDir(item.id);
 
     // Re-run the full gates (narration cue/coverage included) at build time.
     const narration = this._narrationFor(item, compositionDir, videoPath);
@@ -509,7 +564,7 @@ export class ProductionEngine extends BaseEngine {
     writeFileSync(path.join(compositionDir, 'index.html'), html, 'utf8');
 
     mkdirSync(this.rendersDir, { recursive: true });
-    const picturePath = path.join(this.rendersDir, `item-${item.id}.mp4`);
+    const picturePath = this.paths.renderPath(item.id, 'final');
     const render = this._renderComposition(compositionDir, picturePath, style, 'final', orientation);
     if (!render.success) {
       this.log('edit', {
@@ -523,12 +578,12 @@ export class ProductionEngine extends BaseEngine {
     let finalPath = picturePath;
     const mix = mixSfx({
       videoPath: picturePath,
-      outputPath: path.join(this.rendersDir, `item-${item.id}.mixed.mp4`),
+      outputPath: this.paths.renderPath(item.id, 'mixed'),
       sfx: [],
       style,
       resolveSfx: () => null,
     });
-    if (mix.mixed) finalPath = path.join(this.rendersDir, `item-${item.id}.mixed.mp4`);
+    if (mix.mixed) finalPath = this.paths.renderPath(item.id, 'mixed');
     else if (mix.error) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'error',
@@ -749,7 +804,7 @@ export class ProductionEngine extends BaseEngine {
       ? [filePath]
       : [
           path.resolve(PROJECT_ROOT, filePath),
-          path.resolve(DATA_DIR, filePath),
+          path.resolve(this.paths.data, filePath),
           path.resolve(process.cwd(), filePath),
         ];
     return candidates.find((p) => existsSync(p)) ?? null;
@@ -804,31 +859,42 @@ export class ProductionEngine extends BaseEngine {
     }
   }
 
-  /** Copy the source into the composition project and transcribe it. */
+  /**
+   * Put the source next to the composition as `source.<ext>` — HARDLINKED when
+   * the filesystem allows, so the a-roll costs zero extra bytes instead of the
+   * full duplicate this used to copy (116MB and 63MB, twice on disk).
+   * Returns the name the composition HTML references, relative to its folder.
+   */
   _sourceInto(compositionDir, videoPath) {
     const name = `source${path.extname(videoPath)}`;
     const dest = path.join(compositionDir, name);
-    if (!existsSync(dest)) copyFileSync(videoPath, dest);
+    if (path.resolve(videoPath) !== path.resolve(dest) && !existsSync(dest)) {
+      linkOrCopy(videoPath, dest);
+    }
     return name;
   }
 
+  /**
+   * The transcript for this footage — ONE file, always the sibling of the video
+   * it describes (`<video>.transcript.json`), never a copy in the composition
+   * folder. A legacy composition that already carries its own `transcript.json`
+   * keeps reading it, so an item under review never has to move.
+   */
   _transcriptFor(compositionDir, videoPath) {
-    const transcriptPath = path.join(compositionDir, 'transcript.json');
-    if (!existsSync(transcriptPath)) {
-      // Reuse a transcript the cleaner already made next to the video
-      // (e.g. vid1.cleaned.transcript.json) instead of listening again.
-      const sibling = videoPath.replace(/\.[^.]+$/, '.transcript.json');
-      if (existsSync(sibling) && statSync(sibling).size > 0
-          && statSync(sibling).mtimeMs >= statSync(videoPath).mtimeMs) {
-        copyFileSync(sibling, transcriptPath);
-      } else {
-        const res = spawnSync('python', [
-          TRANSCRIBE_PY, videoPath, '--model', 'base.en', '--out', transcriptPath, '--lexicon', LEXICON_PATH,
-        ], { encoding: 'utf8', timeout: 300000 });
-        if (res.status !== 0) throw new Error(`transcription failed: ${res.stderr}`);
-      }
+    const legacyLocal = path.join(compositionDir, 'transcript.json');
+    const sibling = this.paths.transcriptFor(videoPath);
+    if (existsSync(legacyLocal)) return JSON.parse(readFileSync(legacyLocal, 'utf8'));
+
+    const fresh = existsSync(videoPath) && existsSync(sibling)
+      && statSync(sibling).size > 0
+      && statSync(sibling).mtimeMs >= statSync(videoPath).mtimeMs;
+    if (!fresh) {
+      const res = spawnSync('python', [
+        TRANSCRIBE_PY, videoPath, '--model', 'base.en', '--out', sibling, '--lexicon', LEXICON_PATH,
+      ], { encoding: 'utf8', timeout: 300000 });
+      if (res.status !== 0) throw new Error(`transcription failed: ${res.stderr}`);
     }
-    return JSON.parse(readFileSync(transcriptPath, 'utf8'));
+    return JSON.parse(readFileSync(sibling, 'utf8'));
   }
 
   /**
@@ -979,6 +1045,10 @@ export class ProductionEngine extends BaseEngine {
 
     if (result.error) return { success: false, error: result.error.message };
     if (result.status !== 0) return { success: false, error: `exit code ${result.status}: ${result.stderr?.slice(0, 500)}` };
+    // HyperFrames drops its scratch (work-*, *.hf-transaction-*) inside the
+    // project dir. It is not part of this item, so clear it while we know no
+    // render is running — otherwise it piles up (one smoke run left 228 frames).
+    pruneRenderScratch(compositionDir);
     return { success: true };
   }
 }

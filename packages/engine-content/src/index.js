@@ -22,7 +22,7 @@
 //   engine.run({ dryRun: true })           — preview without changes
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { BaseEngine, PROJECT_ROOT, contentItem, playbookRule, transition, requestGate } from '@content-os/core';
+import { BaseEngine, PROJECT_ROOT, contentItem, playbookRule, transition, requestGate, makePaths } from '@content-os/core';
 
 // ---------------------------------------------------------------------------
 // Scoring weights — configurable via settings.content_weights
@@ -542,9 +542,9 @@ export class ContentEngine extends BaseEngine {
         reason: 'script approved — ready to shoot',
       });
 
-      // The script is the spine of the clean. Freeze it into the shoot folder
+      // The script is the spine of the clean. Freeze it into the item folder
       // the recording will be dropped into, so the file the human reads from IS
-      // the script the cleaner aligns to. `data/vid<id>/script.txt`.
+      // the script the cleaner aligns to. `data/item-<id>/script.txt`.
       const shoot = this._writeShootScript(item);
 
       this.log('ready', {
@@ -565,10 +565,16 @@ export class ContentEngine extends BaseEngine {
   }
 
   /**
-   * Write the shoot folder + `script.txt` for a ready item: the spoken lines,
+   * Write the item's folder + `script.txt` for a ready item: the spoken lines,
    * one per line, from the approved script JSON (hook, then script, then cta).
    * Spoken words only — no point titles, no headers. Idempotent: it rewrites
    * script.txt and never touches any footage already in the folder.
+   *
+   * `data/item-<id>/` is the one folder this item owns (see core/paths.js):
+   * script.txt for the human to read from, script.json as a mirror of
+   * content_items.script so the folder is self-describing. The DB stays the
+   * source of truth — both files are refreshed on every ready().
+   *
    * @returns {{ dir: string, path: string } | null} null when there is no valid script
    */
   _writeShootScript(item) {
@@ -586,11 +592,13 @@ export class ContentEngine extends BaseEngine {
     }
     if (!lines.length) return null;
 
-    const dir = path.join(this._dataDir(), `vid${item.id}`);
+    const p = makePaths(this._dataDir());
+    const dir = p.itemDir(item.id);
     mkdirSync(dir, { recursive: true });
     const scriptPath = path.join(dir, 'script.txt');
     writeFileSync(scriptPath, `${lines.join('\n')}\n`, 'utf8');
-    return { dir: `data/vid${item.id}`, path: scriptPath };
+    writeFileSync(p.scriptJson(item.id), `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+    return { dir: p.relative(dir), path: scriptPath };
   }
 
   /** Where the shoot folders live. Overridable so tests never touch the repo. */

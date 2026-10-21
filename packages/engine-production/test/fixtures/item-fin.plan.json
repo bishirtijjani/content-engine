@@ -1,0 +1,367 @@
+{
+  "video": {
+    "duration": 15.6,
+    "orientation": "portrait",
+    "id": "item-fin",
+    "planDir": "data/compositions/item-fin/plan",
+    "footage": "data/compositions/item-fin/footage.mp4",
+    "script": "data/compositions/item-fin/script.json",
+    "transcript": "data/compositions/item-fin/transcript.json"
+  },
+  "segments": [
+    {
+      "id": "fin1",
+      "kind": "snapshot",
+      "section": "Financial snapshot",
+      "frame": "full",
+      "start": 0.0,
+      "end": 15.6,
+      "transitionOut": { "technique": "none" },
+      "sceneGraph": {
+        "scene": { "id": "fin1", "orientation": "full", "duration": 15.6 },
+        "nodes": [
+          {
+            "id": "root",
+            "type": "group",
+            "layout": { "x": 0, "y": 0, "w": 1, "h": 1 },
+            "children": [
+              {
+                "id": "kicker",
+                "type": "text",
+                "layout": { "x": 0.09, "y": 0.085, "w": 0.82, "h": 0.03 },
+                "text": { "value": "Financial snapshot" },
+                "style": {
+                  "font-family": "var(--brand-body)",
+                  "font-weight": "800",
+                  "font-size": "30px",
+                  "letter-spacing": "0.22em",
+                  "text-transform": "uppercase",
+                  "color": "var(--brand-text)",
+                  "opacity": "0.85"
+                }
+              },
+              {
+                "id": "kicker-rule",
+                "type": "rule",
+                "layout": { "x": 0.09, "y": 0.122, "w": 0.20, "h": 0.0035 },
+                "style": { "background": "var(--brand-orange)", "border-radius": "3px" }
+              },
+              {
+                "id": "unit-revenue",
+                "type": "group",
+                "layout": { "x": 0.09, "y": 0.15, "w": 0.82, "h": 0.135 },
+                "children": [
+                  {
+                    "id": "label-revenue",
+                    "type": "text",
+                    "layout": { "x": 0, "y": 0, "w": 1, "h": 0.34 },
+                    "text": { "value": "Revenue" },
+                    "style": {
+                      "font-family": "var(--brand-body)",
+                      "font-weight": "700",
+                      "font-size": "40px",
+                      "letter-spacing": "0.18em",
+                      "text-transform": "uppercase",
+                      "text-align": "center",
+                      "color": "var(--brand-text)",
+                      "opacity": "0.8"
+                    }
+                  },
+                  {
+                    "id": "term-revenue",
+                    "type": "figure",
+                    "layout": { "x": 0, "y": 0.36, "w": 1, "h": 0.64 },
+                    "value": 128400,
+                    "format": "currency",
+                    "style": {
+                      "font-family": "var(--brand-display)",
+                      "font-weight": "900",
+                      "font-size": "128px",
+                      "letter-spacing": "-0.02em",
+                      "line-height": "1",
+                      "text-align": "center",
+                      "color": "var(--brand-text)"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "unit-expenses",
+                "type": "group",
+                "layout": { "x": 0.09, "y": 0.30, "w": 0.82, "h": 0.135 },
+                "children": [
+                  {
+                    "id": "label-expenses",
+                    "type": "text",
+                    "layout": { "x": 0, "y": 0, "w": 1, "h": 0.34 },
+                    "text": { "value": "\u2212  Expenses" },
+                    "style": {
+                      "font-family": "var(--brand-body)",
+                      "font-weight": "700",
+                      "font-size": "40px",
+                      "letter-spacing": "0.18em",
+                      "text-transform": "uppercase",
+                      "text-align": "center",
+                      "color": "var(--brand-text)",
+                      "opacity": "0.8"
+                    }
+                  },
+                  {
+                    "id": "term-expenses",
+                    "type": "figure",
+                    "layout": { "x": 0, "y": 0.36, "w": 1, "h": 0.64 },
+                    "value": 84200,
+                    "format": "currency",
+                    "style": {
+                      "font-family": "var(--brand-display)",
+                      "font-weight": "900",
+                      "font-size": "128px",
+                      "letter-spacing": "-0.02em",
+                      "line-height": "1",
+                      "text-align": "center",
+                      "color": "var(--brand-text)"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "eq-rule",
+                "type": "rule",
+                "layout": { "x": 0.09, "y": 0.455, "w": 0.82, "h": 0.0035 },
+                "style": { "background": "rgba(255,255,255,0.55)", "border-radius": "3px" }
+              },
+              {
+                "id": "label-profit",
+                "type": "text",
+                "layout": { "x": 0.09, "y": 0.478, "w": 0.82, "h": 0.032 },
+                "text": { "value": "Profit" },
+                "style": {
+                  "font-family": "var(--brand-body)",
+                  "font-weight": "800",
+                  "font-size": "40px",
+                  "letter-spacing": "0.18em",
+                  "text-transform": "uppercase",
+                  "text-align": "center",
+                  "color": "var(--brand-text)",
+                  "opacity": "0.9"
+                }
+              },
+              {
+                "id": "result-profit",
+                "type": "figure",
+                "layout": { "x": 0.09, "y": 0.515, "w": 0.82, "h": 0.105 },
+                "value": 44200,
+                "format": "currency",
+                "style": {
+                  "font-family": "var(--brand-display)",
+                  "font-weight": "900",
+                  "font-size": "170px",
+                  "letter-spacing": "-0.02em",
+                  "line-height": "1",
+                  "text-align": "center",
+                  "color": "var(--brand-surface)",
+                  "background": "var(--brand-blue)",
+                  "border-radius": "22px",
+                  "padding": "14px 0 0 0",
+                  "box-shadow": "0 26px 64px rgba(0,0,0,.30)"
+                }
+              },
+              {
+                "id": "txn-card",
+                "type": "group",
+                "layout": { "x": 0.09, "y": 0.625, "w": 0.82, "h": 0.11 },
+                "style": {
+                  "background": "rgba(9,14,26,0.72)",
+                  "border-radius": "20px",
+                  "padding": "0px"
+                },
+                "children": [
+                  {
+                    "id": "txn-flag",
+                    "type": "icon",
+                    "name": "flag",
+                    "size": 44,
+                    "layout": { "x": 0.05, "y": 0.16, "w": 0.07, "h": 0.46 },
+                    "color": "#FF6B6B"
+                  },
+                  {
+                    "id": "txn-id",
+                    "type": "text",
+                    "layout": { "x": 0.14, "y": 0.14, "w": 0.30, "h": 0.5 },
+                    "text": { "value": "#48213" },
+                    "style": {
+                      "font-family": "var(--brand-mono)",
+                      "font-size": "32px",
+                      "color": "var(--brand-text)",
+                      "line-height": "1.5"
+                    }
+                  },
+                  {
+                    "id": "txn-amount",
+                    "type": "text",
+                    "layout": { "x": 0.44, "y": 0.14, "w": 0.24, "h": 0.5 },
+                    "text": { "value": "$2,450" },
+                    "style": {
+                      "font-family": "var(--brand-mono)",
+                      "font-size": "32px",
+                      "color": "var(--brand-text)",
+                      "line-height": "1.5"
+                    }
+                  },
+                  {
+                    "id": "txn-status",
+                    "type": "text",
+                    "layout": { "x": 0.68, "y": 0.14, "w": 0.27, "h": 0.5 },
+                    "text": { "value": "Failed" },
+                    "style": {
+                      "font-family": "var(--brand-body)",
+                      "font-weight": "800",
+                      "font-size": "30px",
+                      "letter-spacing": "0.08em",
+                      "text-transform": "uppercase",
+                      "text-align": "right",
+                      "color": "#FF6B6B",
+                      "line-height": "1.6"
+                    }
+                  },
+                  {
+                    "id": "txn-note",
+                    "type": "text",
+                    "layout": { "x": 0.05, "y": 0.62, "w": 0.90, "h": 0.34 },
+                    "text": { "value": "Payment not captured \u2014 review required" },
+                    "style": {
+                      "font-family": "var(--brand-body)",
+                      "font-weight": "600",
+                      "font-size": "26px",
+                      "color": "#FF9A9A"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "animations": [],
+        "transitions": { "technique": "none" }
+      },
+      "beats": [
+        {
+          "id": "fb1",
+          "start": 0.0,
+          "end": 2.6,
+          "spoken": "Here is your financial snapshot for this month.",
+          "element": "Kicker on the backdrop",
+          "action": {
+            "op": "introduce",
+            "target": "kicker",
+            "cue": { "kicker": "financial" }
+          }
+        },
+        {
+          "id": "fb2",
+          "start": 0.7,
+          "end": 2.5,
+          "spoken": "snapshot",
+          "element": "Rule draws under the kicker",
+          "action": { "op": "draw", "target": "kicker-rule", "cue": { "kicker-rule": "snapshot" } }
+        },
+        {
+          "id": "fb3a",
+          "start": 2.56,
+          "end": 5.6,
+          "spoken": "Revenue",
+          "element": "Revenue unit enters as the hero (big, centred)",
+          "action": {
+            "op": "introduce",
+            "target": "unit-revenue",
+            "cue": { "unit-revenue": "Revenue" },
+            "from": { "dx": 0, "dy": 235, "scale": 1.5 }
+          }
+        },
+        {
+          "id": "fb3b",
+          "start": 2.56,
+          "end": 5.6,
+          "spoken": "Revenue came in at 128,400.",
+          "element": "Revenue label + figure count up",
+          "action": {
+            "op": "introduce",
+            "target": ["label-revenue", "term-revenue"],
+            "cue": { "label-revenue": "Revenue", "term-revenue": "128,400" }
+          }
+        },
+        {
+          "id": "fb4",
+          "start": 5.2,
+          "end": 8.0,
+          "spoken": "Expenses",
+          "element": "Revenue unit settles into the equation (top line)",
+          "action": { "op": "move", "target": "unit-revenue", "cue": { "unit-revenue": "Expenses" } }
+        },
+        {
+          "id": "fb5",
+          "start": 5.76,
+          "end": 8.0,
+          "spoken": "Expenses were 84,200.",
+          "element": "Minus + Expenses unit lands beneath Revenue",
+          "action": {
+            "op": "introduce",
+            "target": ["unit-expenses", "label-expenses", "term-expenses"],
+            "cue": { "unit-expenses": "84,200", "label-expenses": "Expenses", "term-expenses": "84,200" }
+          }
+        },
+        {
+          "id": "fb6",
+          "start": 7.9,
+          "end": 10.9,
+          "spoken": "That leaves",
+          "element": "The equals-rule draws aha",
+          "action": { "op": "draw", "target": "eq-rule", "cue": { "eq-rule": "leaves" } }
+        },
+        {
+          "id": "fb7",
+          "start": 8.5,
+          "end": 10.9,
+          "spoken": "a profit of 44,200.",
+          "element": "Profit label + amber figure count up on a navy panel",
+          "action": {
+            "op": "introduce",
+            "target": ["label-profit", "result-profit"],
+            "cue": { "label-profit": "profit", "result-profit": "44,200" }
+          }
+        },
+        {
+          "id": "fb8",
+          "start": 11.0,
+          "end": 13.0,
+          "spoken": "One transaction failed to capture,",
+          "element": "Failed-transaction card slides in below the result",
+          "action": {
+            "op": "introduce",
+            "target": ["txn-card", "txn-flag", "txn-id", "txn-amount", "txn-status", "txn-note"],
+            "cue": {
+              "txn-card": "transaction",
+              "txn-flag": "transaction",
+              "txn-id": "transaction",
+              "txn-amount": "failed",
+              "txn-status": "failed",
+              "txn-note": "capture"
+            }
+          }
+        },
+        {
+          "id": "fb9",
+          "start": 13.0,
+          "end": 15.6,
+          "spoken": "and it is flagged for review.",
+          "element": "Failed status pulses; the note confirms the review",
+          "action": {
+            "op": "pulse",
+            "target": ["txn-flag", "txn-status"],
+            "cue": { "txn-flag": "flagged", "txn-status": "flagged" }
+          }
+        }
+      ]
+    }
+  ]
+}

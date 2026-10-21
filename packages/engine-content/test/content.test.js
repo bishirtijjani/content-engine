@@ -326,8 +326,8 @@ test('ready: writes script.txt into the shoot folder for the human to read', () 
   approveGateSync(db, 'script_review', 1);
   new ContentEngine(db).ready();
 
-  const p = path.join(process.env.CONTENT_OS_DATA_DIR, 'vid1', 'script.txt');
-  assert.ok(existsSync(p), 'script.txt is written into data/vid<id>/');
+  const p = path.join(process.env.CONTENT_OS_DATA_DIR, 'item-1', 'script.txt');
+  assert.ok(existsSync(p), 'script.txt is written into data/item-<id>/');
   const text = readFileSync(p, 'utf8');
   const parsed = JSON.parse(script);
   assert.ok(text.includes(parsed.hook), 'the hook is in the read file');

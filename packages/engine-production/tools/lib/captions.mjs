@@ -87,12 +87,25 @@ export function splitCaptions(tokens, o) {
       // emphasis rides its own line, so it costs no plain-line budget
       const wouldPlain = plainCount(cur) + (t.emph ? 0 : 1);
       const wouldChars = plainText(cur).length + (t.emph ? 0 : t.text.length + 1);
+      // A mark on the PREVIOUS token is a hard boundary, with or without the
+      // 2-token guard: a sentence/pause flush can leave a one-token caption
+      // ("software." | "tools,") and the conjunction after it must still cut.
+      // Otherwise the splitter builds the caption validateCaptions() rejects
+      // ("tools, But the real") and the build hard-fails. The one exception: a
+      // lone function word ("So,") may never end a caption (rule 3), so it stays
+      // and the next token joins it.
+      const loneFuncTail = !enough && !endsSentence(prev.text) && FUNC_TAIL.has(norm(prev.text));
+      const boundaryPrev = !loneFuncTail && (endsSentence(prev.text) || endsClause(prev.text));
+      // Never cut BEFORE a token that carries a mark — the boundary belongs
+      // after it. Cutting first would start a caption with "missing," and lose
+      // the clause split on the word after it.
+      const marksBoundary = endsClause(t.text) || endsSentence(t.text);
 
       if (
-        endsSentence(prev.text) ||
+        boundaryPrev ||
         t.start - prev.end > o.pauseGap ||
-        (enough && (endsClause(prev.text) || CONJ.has(w) || PREP_BREAK.has(w))) ||
-        (enough && (wouldPlain > o.maxWords || wouldChars > o.maxChars))
+        (enough && (CONJ.has(w) || PREP_BREAK.has(w))) ||
+        (enough && !marksBoundary && (wouldPlain > o.maxWords || wouldChars > o.maxChars))
       ) flush();
     }
     cur.push(t);

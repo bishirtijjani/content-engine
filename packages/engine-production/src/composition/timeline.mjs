@@ -17,10 +17,11 @@
 // All motion lives in one paused GSAP timeline registered as
 // `window.__timelines["main"]` — the runtime seeks it. Beats -> motion.mjs;
 // scene entrance/exit -> motion.mjs; captions are clips the runtime shows/hides.
-import { renderSnapshotScene } from './snapshot.mjs';
+import { renderSnapshotHtml } from './snapshot.mjs';
 import { deriveSegments } from './footage.mjs';
-import { beatLines, sceneLines, countUpHelper } from './motion.mjs';
+import { beatLines, sceneLines, countUpHelper, drawHelper } from './motion.mjs';
 import { loadStyle, loadBackdrop, LEXICON_PATH } from '../style.mjs';
+import { fontFaceCss } from '../fonts.mjs';
 import { buildCaptionLayer } from '../build-captions.mjs';
 
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -81,7 +82,7 @@ export function buildSnapshotComposition({
     if (seg.kind !== 'snapshot') continue; // footage: the face, no scene
     const next = segments[i + 1] ?? null;
     const sel = sceneSel(seg.id);
-    const { html, css } = renderSnapshotScene(seg, { style: s, width, height, orientation });
+    const { html, css } = renderSnapshotHtml(seg, { style: s, width, height, orientation });
     sceneCss.set(css, true);
     // Segments are already contiguous (derived): this scene runs to its end, and
     // the next segment (a snapshot on the same backdrop, or footage) takes over.
@@ -130,6 +131,7 @@ export function buildSnapshotComposition({
     <title>${esc(brand.name || 'Bishir Tijjani')} video</title>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
+${fontFaceCss(s)}
 ${brandVars}
 ${layer.css}
       *, *::before, *::after { box-sizing: border-box; }
@@ -165,6 +167,7 @@ ${layer.html}
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
 ${countUpHelper()}
+${drawHelper()}
 ${lines.join('\n')}
       window.__timelines["main"] = tl;
     </script>

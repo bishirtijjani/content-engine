@@ -43,7 +43,7 @@ addIdeas() → evaluate() → [human: idea_approval] → plan()
 → [human: script_review] → ready() → ready_to_shoot
 ```
 
-`ready()` also creates `data/vid<id>/` and writes `script.txt` there (the spoken
+`ready()` also creates `data/item-<id>/` and writes `script.txt` there (the spoken
 lines, one per line). The human records by reading it, then the clean and
 production steps both work from that folder.
 
@@ -88,25 +88,64 @@ Narration length must match `desired_length_seconds × 2.5 words/sec ±20%`
 `settings.script_framework.length_math`. Read `settings.script_framework`
 before writing — hooks, structure beats, voice, platform fit, checklist.
 
+## Data layout — one folder per item
+
+`data/` (gitignored) has ONE shape, and `packages/core/src/paths.js` is the only
+place that decides it. Never hand-build a path into `data/`.
+
+| Path | What lives there |
+|---|---|
+| `data/content.db` | the database |
+| `data/inbox/` | raw footage nobody has attached yet (`list_footage` scans it) |
+| `data/item-<id>/` | **one folder per `content_items.id`** — everything that item owns, flat |
+| `data/item-<id>/source.mp4` | the recording (`process_footage` adopts it; ONE copy on disk) |
+| `data/item-<id>/source.transcript.json` | its transcript — always a sibling of the video it describes |
+| `data/item-<id>/script.txt` | the spoken lines the human records from (`ready()`) |
+| `data/item-<id>/script.json` | mirror of `content_items.script` — the DB stays the source of truth |
+| `data/item-<id>/<name>.cleaned.mp4`, `.review.json`, `.cuts.json`, … | cleaner outputs |
+| `data/item-<id>/production/` | production work: `snapshots.plan.json`, `index.html`, `plan/` (stills, html, beats, contact sheet) |
+| `data/renders/` | **finished videos only** + detached render logs `_job.out` / `_job.err` / `_job.pid` |
+| `data/tmp/` | scratch — HyperFrames work dirs, test output. Never real data |
+
+**The rule:** a file belongs to an item → `data/item-<id>/`. It is a finished
+deliverable → `data/renders/`. Neither → `data/tmp/` or delete it. Nothing else
+may sit directly under `data/`.
+
+- **The item's id decides the folder**, never a plan's free-text `video.id` —
+  that is how `data/compositions/{video,sg-smoke,agent-loop,item-fin,…}` got
+  minted one ad-hoc plan at a time. `save_snapshot_plan` stamps `video.item` and
+  the plan tools resolve against it, refuse to resolve to nothing, and refuse to
+  write outside `data/`.
+- **One transcript per recording**, `<video>.transcript.json` next to that
+  video. No copies inside the composition folder.
+- **The a-roll is hardlinked, not copied:** `production/source.mp4` links to
+  `data/item-<id>/source.mp4`, so a 116MB source costs 116MB once, not twice.
+- **Legacy folders keep resolving** (`data/compositions/item-<id>`,
+  `data/vid1-test`) through the same resolver, so an item under human review
+  never has to move mid-flight. Migrate one with
+  `node scripts/migrate-data.mjs --item <id> [--dry-run]`; `--all` for every
+  item; `--verify` reports every DB pointer that no longer exists.
+
 ## Cleaning (raw → one clean video)
 
 The cleaner turns one raw recording into one clean video, before production. The
 human puts one video, the separate audio recording, and `script.txt` in
-`data/<name>/`. The script is the spine: the cleaner aligns the spoken words to
+`data/item-<id>/`. The script is the spine: the cleaner aligns the spoken words to
 the script lines, keeps the **last take of each line**, and cuts everything else.
 
 When the item came from the content engine, `ready()` already created the folder
-as `data/vid<id>/` and wrote `script.txt` there from the approved script — the
+as `data/item-<id>/` and wrote `script.txt` there from the approved script — the
 human records by reading it and drops the video + audio into the same folder.
 
 ```bash
-npm run clean -- data/vid1            # propose: cut list + read + review file
-npm run clean -- data/vid1 --apply    # cut, after the human approves
+npm run clean -- data/item-1            # propose: cut list + read + review file
+npm run clean -- data/item-1 --apply    # cut, after the human approves
 ```
 
 - The engine works; the agent decides. The engine cannot judge meaning, so it
   hands every judgement to the agent in **one file**,
-  `data/<name>/<name>.review.json`:
+  `data/<folder>/<name>.review.json` (for an item:
+  `data/item-1/item-1.review.json`):
   - `lines` — each script line, found or not, the words `heard`, `decision`
     `keep`/`skip`, and `start`/`end` to trim the window.
   - `words` — heard vs the script word, `decision` `fix`/`leave` (default
@@ -392,12 +431,6 @@ Captions sit at `top: 72%` of the frame (bottom 28%). The value comes from
 `config/style.json` under `captions.band`. Visual content must stay in the top
 65%. See the `visual-layer` skill for the full composition doctrine.
 
-### Validation script
-
-`scripts/gen-captions-manual.mjs` generates captions from a transcript with
-hardcoded timing and emphasis. It validates word count and character count
-per caption and prints warnings for any that exceed limits.
-
 ## Settings that drive behavior
 
 `brand`, `pillars`, `pillar_details`, `target_audience`, `platforms`,
@@ -407,13 +440,15 @@ Re-seed with `npm run seed` after editing `scripts/seed-*.mjs`.
 ## Commands
 
 ```
-npm test                                  # 193 tests — must stay green
+npm test                                  # 223 tests — must stay green
 npm run seed                              # brand + script + idea frameworks
-npm run clean -- data/vid1                # clean a recording (propose; --apply to cut)
+npm run clean -- data/item-1              # clean a recording (propose; --apply to cut)
 npm --workspace @content-os/engine-production run icons     # rebuild diagrams/icons.generated.mjs (Tabler, MIT)
 node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <id>   # render script
 node --disable-warning=ExperimentalWarning scripts/reset-content.mjs       # purge placeholder content
 node --disable-warning=ExperimentalWarning scripts/cleanup-db.mjs          # wipe all items/gates/history
+node --disable-warning=ExperimentalWarning scripts/migrate-data.mjs --item <id> [--dry-run]   # fold an item's files into data/item-<id>/
+node --disable-warning=ExperimentalWarning scripts/migrate-data.mjs --verify                 # report DB pointers that no longer exist
 ```
 
 ## Environment notes (Windows)

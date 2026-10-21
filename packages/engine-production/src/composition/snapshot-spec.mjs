@@ -14,14 +14,15 @@
 //
 // This module is the shape + the vocabulary + the gates. It does not render.
 import { resolveCueTime, slotValue, cueFor } from './sync.mjs';
+import { validateSceneGraph, nodeSlots } from './scene-graph.mjs';
 
 // What a beat can do to the composition.
 export const ACTION_OPS = [
-  'introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'highlight', 'hold',
+  'introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'highlight', 'draw', 'pulse', 'hold',
 ];
 
 // Ops that land a slot on a narration word (the rest ignore cues).
-const CUE_OPS = new Set(['introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace']);
+const CUE_OPS = new Set(['introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'draw', 'pulse']);
 
 // A segment is footage (the face) or a snapshot (a b-roll composition).
 export const SEGMENT_KINDS = ['footage', 'snapshot'];
@@ -88,6 +89,7 @@ export function normalizeSnapshotPlan(raw) {
   const segments = list.map((s) => ({
     ...s,
     kind: s?.kind === 'footage' ? 'footage' : 'snapshot',
+    sceneGraph: s?.sceneGraph || undefined,
     composition: s?.composition ?? {},
     beats: Array.isArray(s?.beats) ? s.beats.map((b) => ({ ...b, action: b?.action ?? { op: 'introduce' } })) : [],
     transitionOut: s?.transitionOut ?? { technique: 'crossfade' },
@@ -141,13 +143,16 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
     if (s.kind === 'footage') return; // the face; no composition, beats optional
 
     snapshotCount++;
-    if (!SNAPSHOT_CONCEPTS.includes(s.concept)) {
-      problems.push(`${at}.concept "${s.concept}" is not a snapshot concept (${SNAPSHOT_CONCEPTS.join(', ')})`);
+    if (s.sceneGraph) {
+      const sgp = validateSceneGraph(s.sceneGraph);
+      sgp.forEach((p) => problems.push(`${at}.sceneGraph: ${p}`));
+    } else {
+      if (!SNAPSHOT_CONCEPTS.includes(s.concept)) {
+        problems.push(`${at}.concept "${s.concept}" is not a snapshot concept (${SNAPSHOT_CONCEPTS.join(', ')})`);
+      }
+      const comp = s.composition ?? {};
+      if (Object.keys(comp).length === 0) problems.push(`${at} has an empty composition — a snapshot must define its completed visual`);
     }
-
-    // A snapshot is a completed composition — its content must say something.
-    const comp = s.composition ?? {};
-    if (Object.keys(comp).length === 0) problems.push(`${at} has an empty composition — a snapshot must define its completed visual`);
 
     if (!Array.isArray(s.beats) || s.beats.length === 0) {
       problems.push(`${at} has no beats — a snapshot is built by its beats`);
@@ -175,9 +180,17 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
       if (op !== 'hold' && targets.length === 0) {
         problems.push(`${bat}.action.target is required for op "${op}" (name the slot(s) it acts on)`);
       }
-      const validSlots = new Set(slotsFor(s.concept, s.composition ?? {}));
+      let validSlots;
+      if (s.sceneGraph) {
+        validSlots = new Set(nodeSlots(s.sceneGraph));
+      } else {
+        validSlots = new Set(slotsFor(s.concept, s.composition ?? {}));
+      }
       for (const tgt of targets) {
-        if (!validSlots.has(tgt)) problems.push(`${bat}.action.target "${tgt}" is not a slot of ${s.concept} (${[...validSlots].join(', ')})`);
+        if (!validSlots.has(tgt)) {
+          const label = s.sceneGraph ? 'is not a valid target for this segment' : `is not a slot of ${s.concept}`;
+          problems.push(`${bat}.action.target "${tgt}" ${label} (${[...validSlots].join(', ')})`);
+        }
         introduced.add(tgt);
         // A reveal must land on the beat's own narration: the slot's cue (an
         // explicit phrase, or the figure it shows) has to be spoken inside this
@@ -194,7 +207,9 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
     });
 
     // Every slot must be introduced by a beat — nothing shows before its narration.
-    for (const slot of slotsFor(s.concept, s.composition ?? {})) {
+    const allSlots = (s.sceneGraph ? nodeSlots(s.sceneGraph) : slotsFor(s.concept, s.composition ?? {}))
+      .filter((slot) => slot !== 'root'); // the scene container is always on screen
+    for (const slot of allSlots) {
       if (!introduced.has(slot)) problems.push(`${at} slot "${slot}" is introduced by no beat — it would show before its narration`);
     }
   });

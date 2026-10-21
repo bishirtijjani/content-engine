@@ -1,10 +1,10 @@
 // Production Engine — post-shoot pipeline tests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initDb } from '@content-os/core';
+import { initDb, makePaths } from '@content-os/core';
 import { ProductionEngine } from '../src/index.js';
 import { loadStyle } from '../src/style.mjs';
 
@@ -22,7 +22,11 @@ const SNAP_PLAN = {
 
 /** A throwaway data root — tests must never write into the real data/ dir. */
 const TEST_DATA = mkdtempSync(path.join(tmpdir(), 'production-data-'));
-const cleanupComposition = (id) => rmSync(path.join(TEST_DATA, 'compositions', `item-${id}`), { recursive: true, force: true });
+/** Clear an item's work in BOTH trees: data/item-<id> and the pre-migration data/compositions/item-<id>. */
+const cleanupComposition = (id) => {
+  rmSync(path.join(TEST_DATA, `item-${id}`), { recursive: true, force: true });
+  rmSync(path.join(TEST_DATA, 'compositions', `item-${id}`), { recursive: true, force: true });
+};
 
 function freshDb() {
   const dir = mkdtempSync(path.join(tmpdir(), 'production-engine-'));
@@ -91,8 +95,15 @@ test('processFootage: attaches a file path and creates the recording rows', () =
   const result = new ProductionEngine(db, { dataDir: TEST_DATA }).processFootage({ targetId: 1, filePath: file });
   assert.equal(result.processed, 1);
   assert.ok(result.recordingId);
+  // The file is ADOPTED into the item's own folder (hardlinked, one copy on
+  // disk) so recordings.file_path can never point at wherever the human
+  // happened to drop it — and the original is left where it was.
+  const adopted = path.join(TEST_DATA, 'item-1', 'source.mp4');
+  assert.equal(result.path, adopted);
   const rec = db.prepare('SELECT * FROM recordings WHERE id = ?').get(result.recordingId);
-  assert.equal(rec.file_path, file);
+  assert.equal(rec.file_path, adopted);
+  assert.ok(existsSync(adopted), 'the item owns its footage now');
+  assert.ok(existsSync(file), 'the original file is never touched');
   assert.equal(db.prepare('SELECT status FROM content_items WHERE id = 1').get().status, 'shot');
   db.close();
 });
@@ -136,10 +147,57 @@ test('processFootage: throws on unknown item', () => {
   db.close();
 });
 
-test('listFootage: returns a files list', () => {
+test('processFootage: refuses to attach a render as footage', () => {
   const db = freshDb();
-  const result = new ProductionEngine(db, { dataDir: TEST_DATA }).listFootage();
-  assert.ok(Array.isArray(result.files));
+  cleanupComposition(1);
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  mkdirSync(engine.rendersDir, { recursive: true });
+  const render = path.join(engine.rendersDir, 'item-3.mp4');
+  writeFileSync(render, 'rendered');
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Render is not footage', 'ready_to_shoot')").run();
+  assert.throws(() => engine.processFootage({ targetId: 1, filePath: render }), /refusing to attach a render as footage/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recordings').get().n, 0, 'no recording was created');
+  db.close();
+});
+
+test('listFootage: drop-zone files only — never renders, legacy work, or scratch', () => {
+  const db = freshDb();
+  const p = makePaths(TEST_DATA);
+  mkdirSync(p.inboxDir(), { recursive: true });
+  writeFileSync(path.join(p.inboxDir(), 'drop.mp4'), 'x');
+  mkdirSync(p.rendersDir(), { recursive: true });
+  writeFileSync(path.join(p.rendersDir(), 'item-9.mp4'), 'x');
+  mkdirSync(p.tmpDir(), { recursive: true });
+  writeFileSync(path.join(p.tmpDir(), 'scratch.mp4'), 'x');
+  mkdirSync(p.legacyCompositionsDir(), { recursive: true });
+  writeFileSync(path.join(p.legacyCompositionsDir(), 'old.mp4'), 'x');
+  mkdirSync(path.join(p.itemDir(5), 'production'), { recursive: true });
+  writeFileSync(path.join(p.itemDir(5), 'source.mp4'), 'x');
+  writeFileSync(path.join(p.itemDir(5), 'production', 'source.mp4'), 'x');
+
+  const files = new ProductionEngine(db, { dataDir: TEST_DATA }).listFootage().files.map((f) => f.path);
+  assert.ok(files.some((f) => f.endsWith('inbox/drop.mp4')), 'the inbox is the drop zone');
+  assert.ok(files.some((f) => f.endsWith(path.join('item-5', 'source.mp4'))), 'an attached item source is visible');
+  assert.ok(!files.some((f) => f.endsWith(path.join('production', 'source.mp4'))), 'the composition hardlink is not a second file');
+  assert.ok(!files.some((f) => f.endsWith('item-9.mp4')), 'a finished video is not waiting footage');
+  assert.ok(!files.some((f) => f.endsWith('scratch.mp4')), 'scratch is not footage');
+  assert.ok(!files.some((f) => f.endsWith('old.mp4')), 'legacy work is already attached');
+  rmSync(p.inboxDir(), { recursive: true, force: true });
+  db.close();
+});
+
+test('saveSnapshotPlan: the item id is stamped in — a free text id decides nothing', () => {
+  const db = freshDb();
+  cleanupComposition(1);
+  db.prepare("INSERT INTO content_items (title, status) VALUES ('Plan stamp', 'shot')").run();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  const saved = engine.saveSnapshotPlan({ targetId: 1, plan: { video: { id: 'some-ad-hoc-name' }, segments: [] } });
+  const plan = JSON.parse(readFileSync(saved.path, 'utf8'));
+  assert.equal(plan.video.item, 1, 'video.item is what the render tools resolve against');
+  assert.equal(plan.video.id, 'some-ad-hoc-name', 'the label is kept, it just no longer picks the folder');
+  assert.ok(saved.path.includes(path.join('item-1', 'production')), 'it landed in the item tree');
+  assert.ok(!existsSync(path.join(TEST_DATA, 'compositions', 'some-ad-hoc-name')), 'and minted no new folder');
+  cleanupComposition(1); // leave the shared test root as we found it
   db.close();
 });
 

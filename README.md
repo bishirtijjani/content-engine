@@ -238,13 +238,64 @@ engine.run({ dryRun: true });                         // preview without changes
 
 ---
 
-## The Cleaning step (implemented)
+## Data layout
 
-Before production, one raw recording becomes one clean video. Put one video and the separate audio recording in `data/<name>/`; the cleaner syncs them (sample-accurate, drift-corrected) and cuts the pauses and wrong takes.
+Everything generated lives under `data/` (gitignored). One folder per item, and
+`packages/core/src/paths.js` is the only code that decides where things go —
+no engine, tool, or script hand-builds a path into `data/`.
+
+```
+data/
+├── content.db                         the database
+├── inbox/                             raw footage nobody has attached yet (list_footage scans it)
+├── item-<id>/                         one folder per content_items.id — everything that item owns
+│   ├── source.mp4                     the recording (process_footage adopts it — ONE copy on disk)
+│   ├── source.transcript.json         its transcript, always a sibling of the video it describes
+│   ├── script.txt                     spoken lines for recording (content engine ready())
+│   ├── script.json                    mirror of content_items.script (the DB is the source of truth)
+│   ├── <name>.cleaned.mp4, .review.json, .cuts.json, …   cleaner outputs
+│   └── production/                    the production engine's work
+│       ├── snapshots.plan.json        the agent's segment plan (video.item stamped in)
+│       ├── index.html                 the built composition
+│       ├── plan/                      stills, html, beats.md, snapshots.json, contact sheet
+│       └── source.mp4                 hardlink of the a-roll — not a second copy
+├── renders/                           finished videos ONLY + detached logs _job.out / .err / .pid
+└── tmp/                               scratch: HyperFrames work dirs, test output
+```
+
+Three rules:
+
+1. **A file that belongs to an item → `data/item-<id>/`. A finished video →
+   `data/renders/`. Neither → `data/tmp/` or delete it.** Nothing else sits
+   directly under `data/`.
+2. **The item's id decides the folder**, never a plan's free-text `video.id`.
+   `save_snapshot_plan` stamps `video.item`; `tools/plan-snapshots.mjs` and
+   `tools/render-snapshots.mjs` resolve against it, fail loudly when they
+   cannot, and refuse to write outside `data/`. (The old
+   `data/compositions/${video.id ?? 'video'}` fallback is what scattered
+   `data/compositions/{video,sg-smoke,agent-loop,item-fin,item2-sgtest}`.)
+3. **One transcript per recording** — `<video>.transcript.json` next to that
+   video. No second copy inside the composition folder.
+
+Items still in the old tree (`data/compositions/item-<id>`, `data/vid1-test`)
+resolve through the same legacy-aware resolver, so an item under human review
+never has to move mid-flight. Move one when you are ready:
 
 ```bash
-npm run clean -- data/vid1            # propose: print the cut list, cut nothing
-npm run clean -- data/vid1 --apply    # cut, after the human approves
+node scripts/migrate-data.mjs --item 1 --dry-run   # print the plan, change nothing
+node scripts/migrate-data.mjs --item 1             # migrate (idempotent — rerunning is a no-op)
+node scripts/migrate-data.mjs --verify             # every DB pointer that no longer exists
+```
+
+---
+
+## The Cleaning step (implemented)
+
+Before production, one raw recording becomes one clean video. Put one video and the separate audio recording in `data/item-<id>/`; the cleaner syncs them (sample-accurate, drift-corrected) and cuts the pauses and wrong takes.
+
+```bash
+npm run clean -- data/item-1            # propose: print the cut list, cut nothing
+npm run clean -- data/item-1 --apply    # cut, after the human approves
 ```
 
 - It adds no captions and no overlays — it only syncs and cuts. Production does the rest.
@@ -254,7 +305,7 @@ npm run clean -- data/vid1 --apply    # cut, after the human approves
 - **It never writes to its inputs** — the video and the audio are read-only, and it refuses any output equal to an input.
 - Always show the cut list and get the human's yes before `--apply`.
 - Thresholds live in `config/style.json` under `clean`. Steps are cached next to the video; only the cut re-encodes.
-- Output: `data/<name>/<name>.cleaned.mp4` (+ `cleaned.transcript.json`, reused by `edit()` for captions).
+- Output: `data/<folder>/<name>.cleaned.mp4` + `<name>.cleaned.transcript.json` — the folder's basename is the name, so an item writes `data/item-1/item-1.cleaned.mp4`. The transcript is reused by `edit()` for captions.
 
 ---
 
@@ -324,9 +375,16 @@ Icons come from **Tabler** (MIT) — geometry is inlined at build time into `src
 ### Plan tools
 
 ```bash
-node tools/plan-snapshots.mjs data/vid1-test/item-1.plan.json   # derive beats, validate, render stills + contact sheet
-node tools/render-snapshots.mjs data/vid1-test/item-1.plan.json [--final]
+node tools/plan-snapshots.mjs  data/item-1/production/snapshots.plan.json   # derive beats, validate, render stills + contact sheet
+node tools/render-snapshots.mjs data/item-1/production/snapshots.plan.json [--final]
 ```
+
+Both resolve the target item from `plan.video.item` (or `--item <n>`, or an
+`item-<n>` / `vid<n>` shape inside `video.id` / `video.planDir`), verify it
+exists, and write only inside `data/`. Stills and the contact sheet go to
+`data/item-<id>/production/plan/`; rendered videos go to `data/renders/` like
+every other render. A plan with a free-text id and no `video.item` fails with an
+actionable error instead of minting a new folder.
 
 ---
 
@@ -379,8 +437,8 @@ node demo.mjs              # runs the full Content Engine pipeline, renders a sc
 ### Clean a recording
 
 ```bash
-npm run clean -- data/vid1            # propose: print the cut list, cut nothing
-npm run clean -- data/vid1 --apply    # cut, after the human approves
+npm run clean -- data/item-1            # propose: print the cut list, cut nothing
+npm run clean -- data/item-1 --apply    # cut, after the human approves
 ```
 
 ### Smoke test
@@ -402,12 +460,13 @@ content-os/
 ├── src/
 │   ├── render-script.js          script renderer (Markdown + browser viewer)
 │   └── template.html             HTML template for live script editing
-├── data/                         the shared content.db (generated, never committed)
+├── data/                         generated content — content.db, inbox/, item-<id>/, renders/, tmp/ (never committed; see "Data layout")
 ├── scripts/
 │   ├── seed-brand.mjs            seed brand settings (ideas are generated fresh by the agent)
 │   ├── seed-script-framework.mjs seed the script-writing guide (settings.script_framework)
 │   ├── seed-idea-framework.mjs   seed the idea-generation guide (settings.idea_framework)
 │   ├── smoke-pipeline.mjs        end-to-end smoke test
+│   ├── migrate-data.mjs          fold an item's files into data/item-<id>/ (--item <id>, --dry-run, --all, --verify)
 │   ├── reset-content.mjs         purge placeholder content, reset items to agent-ready state
 │   └── serve-script.mjs          render an item's script in the browser (node scripts/serve-script.mjs <id> [--port 3848])
 └── packages/
@@ -419,8 +478,9 @@ content-os/
     │   │   ├── state.js          enforced state machine (transitions, fast-track)
     │   │   ├── gates.js          human gates (request/decide/list)
     │   │   ├── models.js         row mappers (JSON columns decoded)
+    │   │   ├── paths.js          THE data layout: item dirs, adoption, legacy resolution, write guards
     │   │   └── engines/base.js   BaseEngine: logging + queue survey
-    │   └── test/state.test.js    12 tests
+    │   └── test/                 state.test.js (12), paths.test.js (9)
     ├── engine-content/           Content Engine (fully implemented)
     │   ├── src/index.js          addIdeas, discover, evaluate, plan, research, script, ready, resubmit
     │   └── test/
@@ -432,7 +492,7 @@ content-os/
     │   ├── src/composition/      the engine: snapshot-spec, snapshot (recipes), motion, sync, footage (derivation), timeline, snapshot-plan, snapshot-render
     │   ├── src/diagrams/icons*   the Tabler icon registry (geometry inlined at build time)
     │   ├── tools/clean/          the cleaner CLI (clean.mjs + align.py/place.py/silence.py, lib/cut.mjs, lib/guard.mjs)
-    │   ├── tools/                plan-snapshots.mjs, render-snapshots.mjs, build-icons.mjs
+    │   ├── tools/                plan-snapshots.mjs, render-snapshots.mjs, build-icons.mjs, lib/item-dir.mjs (item target resolution)
     │   ├── assets/sfx/           reusable sounds
     │   └── backdrop/brand.svg    the designed base layer (grid with depth)
     ├── engine-distribution/      skeleton — adapt → schedule → publish → cross-post
@@ -445,14 +505,14 @@ content-os/
 ## Testing
 
 ```bash
-npm test                 # 193 tests across core + engine-content + engine-production + lifecycle
+npm test                 # 223 tests across core + engine-content + engine-production + lifecycle
 ```
 
 | Package | Tests | What they cover |
 |---|---|---|
-| `@content-os/core` | 12 | Transitions, gates, lifecycle, retry, fast-track |
-| `@content-os/engine-content` | 38 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
-| `@content-os/engine-production` | 138 | Cleaning (cut list, input guard), footage attach, the segment plan (spec gates, footage derivation, cue resolution, timeline/motion), snapshot recipes + render, icons, sfx mix, captions, the full save→plan→approve→build flow, review/resubmit/schedule |
+| `@content-os/core` | 21 | Transitions, gates, lifecycle, retry, fast-track, the data layout contract (`paths.js`: one folder per item, adoption/hardlinking, legacy resolution, write guards, renderer scratch pruning) |
+| `@content-os/engine-content` | 39 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
+| `@content-os/engine-production` | 158 | Cleaning (cut list, input guard), footage attach + adoption, the segment plan (spec gates, footage derivation, cue resolution, timeline/motion), snapshot recipes + render, plan-target resolution (`tools/lib/item-dir.mjs`), icons, sfx mix, captions, the full save→plan→approve→build flow, review/resubmit/schedule |
 | Lifecycle | 5 | Full lifecycle with all 3 gates, batch production, fast-track, illegal jumps, Markdown rendering |
 
 The cleaning steps also have Python self-tests (not run by `npm test`): `python packages/engine-production/tools/clean/test_align.py` and `test_place.py`.
