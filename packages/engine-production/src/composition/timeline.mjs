@@ -53,6 +53,7 @@ export function buildSnapshotComposition({
   fit = 'cover',
   fps = 24,
   audioOnly = false,
+  resolveClip = null,
 }) {
   const s = style ?? loadStyle();
   const brand = s.brand ?? {};
@@ -66,6 +67,7 @@ export function buildSnapshotComposition({
     minSnapshotSeconds: s?.footage?.minSnapshotSeconds ?? 2.0,
   }).segments;
   const snapshots = segments.filter((x) => x.kind === 'snapshot');
+  const clips = segments.filter((x) => x.kind === 'clip');
   const dur = r3(duration ?? (segments.length ? segments[segments.length - 1].end : 60));
   const backdrop = loadBackdrop(s);
 
@@ -108,6 +110,31 @@ export function buildSnapshotComposition({
     }
   }
 
+  // Clips are root-level media, like the a-roll: the runtime seeks and decodes
+  // only direct children of the composition. They play muted over the narration,
+  // take the screen for their exact window, and never change the audio.
+  const clipHtml = [];
+  const clipRuns = [];
+  for (const c of clips) {
+    const src = resolveClip ? resolveClip(c) : c.src;
+    if (!src) continue;
+    const start = r3(c.start ?? 0);
+    const end = r3(c.end ?? start);
+    const mediaStart = Number.isFinite(c.sourceIn) ? r3(c.sourceIn) : 0;
+    clipHtml.push(
+      `      <video id="clip-${esc(c.id)}" class="clip sc-clip" src="${esc(src)}" ` +
+      `data-start="${start}" data-duration="${r3(Math.max(0.1, end - start))}" ` +
+      `data-track-index="2" data-media-start="${mediaStart}" muted playsinline></video>`
+    );
+    const last = clipRuns[clipRuns.length - 1];
+    if (last && Math.abs(start - last.end) <= 0.001) last.end = end;
+    else clipRuns.push({ start, end });
+  }
+  for (const r of clipRuns) {
+    lines.push(`      tl.set('#a-roll', { opacity: 0 }, ${r.start});`);
+    lines.push(`      tl.set('#a-roll', { opacity: 1 }, ${r.end});`);
+  }
+
   for (const c of counts) {
     lines.push(`      __countUp("${c.sel}", ${c.at}, ${r3(c.dur)});`);
   }
@@ -145,6 +172,7 @@ ${layer.css}
       #backdrop svg { display: block; width: 100%; height: 100%; }
       #a-roll { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: ${fit === 'contain' ? 'contain' : 'cover'}; filter: ${gradeFilter(s)}; z-index: 1; }
       .scene { position: absolute; inset: 0; z-index: 2; }
+      .sc-clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 2; background: ${colors.bg || '#EA580C'}; }
       .sc-bg { position: absolute; inset: 0; z-index: 0; }
       .sc-bg svg { display: block; width: 100%; height: 100%; }
       .cap { z-index: 5; }
@@ -163,6 +191,7 @@ ${sceneCssText ? sceneCssText + '\n' : ''}    </style>
       <div id="backdrop" aria-hidden="true">${backdrop}</div>
       ${audioOnly ? '' : `<video id="a-roll" class="clip" src="${esc(videoSrc)}" data-start="0" data-duration="${dur}" data-track-index="0" muted playsinline></video>`}
 ${sceneHtml.join('\n')}
+${clipHtml.join('\n')}
 ${layer.html}
       <audio id="a-roll-audio" src="${esc(videoSrc)}" data-start="0" data-duration="${dur}" data-track-index="10" data-volume="1"></audio>
     </div>
@@ -186,7 +215,7 @@ ${lines.join('\n')}
 </html>
 `;
 
-  return { html, scenes: snapshots.length, beats: snapshots.reduce((n, x) => n + x.beats.length, 0), tweens: tweenCount };
+  return { html, scenes: snapshots.length, clips: clips.length, beats: snapshots.reduce((n, x) => n + x.beats.length, 0), tweens: tweenCount };
 }
 
 /** CSS filter from the style's grade block. */

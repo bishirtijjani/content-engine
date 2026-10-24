@@ -33,9 +33,10 @@ export function buildMenu({ style = null, orientation = 'portrait' } = {}) {
     // snapshot is ONE completed composition, and its beats progressively build
     // it. Design the completed composition first, then say what each beat does.
     plan: {
-      model: 'Video -> Segments -> Beats. The video is an ordered list of segments: FOOTAGE (you talking — the face, no visuals) or SNAPSHOT (a b-roll section shown on the orange backdrop, ONE completed composition built by its beats).',
+      model: 'Video -> Segments -> Beats. The video is an ordered list of segments: FOOTAGE (you talking — the face, no visuals), SNAPSHOT (a b-roll section shown on the orange backdrop, ONE completed composition built by its beats), or CLIP (a real screen recording / footage insert, played full-frame and muted under the narration).',
       segmentKinds: SEGMENT_KINDS,
       footage: 'You do not place footage by hand. The engine derives it word-accurately: a snapshot is on screen only while its content builds and shows (from its first body element to its last), and every remaining stretch — a lead-in, a gap between snapshots, the hook, the tail — becomes a footage segment (the face). A gap shorter than the style threshold holds the previous scene instead (seamless b-roll); a snapshot shorter than the snapshot minimum is held longer. The emitted plan lists every footage segment with the narration that plays over it.',
+      clip: 'A CLIP is a real video file (screen recording, b-roll) shown full-frame for an exact window. Fields: src (file path), start, end, optional sourceIn/sourceOut (seconds into the file), why. It plays 1x and muted; the narration keeps running. On-screen length must equal the source length. A clip is never stretched to fill a gap — gaps around it become footage.',
       snapshotConcepts: SNAPSHOT_CONCEPTS,
       // Named diagram layouts: a segment may carry `diagram:{name,spec}` instead
       // of a snapshot concept. The layout owns its fields and slot ids.
@@ -58,7 +59,7 @@ export function buildMenu({ style = null, orientation = 'portrait' } = {}) {
         note: 'A beat reveals a slot on the exact words. A figure is cued automatically on the number it shows ("200" reveals when "200" is said). For anything else, set action.cue to the word/phrase the slot should appear on — a string (all of the beat\'s slots) or a map {slot: phrase}. The phrase must be spoken inside that beat; without a cue the slot appears at the beat start.',
         example: '{ "op": "introduce", "target": ["result"], "cue": { "result": "2,500" } }',
       },
-      rule: 'Walk the narration in order. Use FOOTAGE for the hook and anywhere the face carries it; use a SNAPSHOT where a structure or a live visual gives more than the face. Every segment covers a run of the narration; segments are ordered, non-overlapping, and cover every narration beat. In a snapshot, design the completed composition first, then give every beat an action (op + target slot(s)) that builds toward it — every slot gets a beat. Consecutive snapshots play back-to-back on the backdrop; footage appears only where you place a footage segment. A snapshot is never the caption text redrawn.',
+      rule: 'Walk the narration in order. Use FOOTAGE for the hook and anywhere the face carries it; use a SNAPSHOT where a structure or a live visual gives more than the face; use a CLIP when the real screen or footage is the point. Every segment covers a run of the narration; segments are ordered, non-overlapping, and cover every narration beat. In a snapshot, design the completed composition first, then give every beat an action (op + target slot(s)) that builds toward it — every slot gets a beat. Consecutive snapshots play back-to-back on the backdrop; footage appears only where you place a footage segment. A snapshot is never the caption text redrawn.',
     },
   };
 }

@@ -412,7 +412,8 @@ test('menu: exposes the segment model, concepts, actions and icons', () => {
   const db = freshDb();
   const m = new ProductionEngine(db, { dataDir: TEST_DATA }).menu();
   assert.equal(m.plan.model.startsWith('Video -> Segments -> Beats'), true);
-  assert.deepEqual(m.plan.segmentKinds, ['footage', 'snapshot']);
+  assert.deepEqual(m.plan.segmentKinds, ['footage', 'snapshot', 'clip']);
+  assert.ok(m.plan.clip.includes('sourceIn'));
   assert.ok(m.plan.snapshotConcepts.includes('equation'));
   assert.ok(m.plan.beatActions.includes('introduce'));
   assert.ok(m.icons.count > 100);
@@ -452,6 +453,32 @@ test('edit/preview refuse until the snapshot plan is approved', () => {
   approveGateSync(db, 'snapshot_plan_review', 1);
   assert.equal(engine.snapshotPlanApproved(1), true);
   cleanupComposition(1);
+  db.close();
+});
+
+// ============================================================================
+// CLIP MEDIA
+// ============================================================================
+
+test('_clipMediaProblems: refuses a missing clip source', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  const problems = engine._clipMediaProblems({
+    segments: [{ id: 'c1', kind: 'clip', src: path.join(TEST_DATA, 'missing-clip.mp4'), start: 0, end: 1 }],
+  });
+  assert.ok(problems.some((p) => /\(clip\) source not found/.test(p)));
+  db.close();
+});
+
+test('_clipMediaProblems: refuses a non-video clip source', () => {
+  const db = freshDb();
+  const engine = new ProductionEngine(db, { dataDir: TEST_DATA });
+  const notVideo = path.join(TEST_DATA, 'clip-source.txt');
+  writeFileSync(notVideo, 'not a video');
+  const problems = engine._clipMediaProblems({
+    segments: [{ id: 'c1', kind: 'clip', src: notVideo, start: 0, end: 1 }],
+  });
+  assert.ok(problems.some((p) => /\(clip\) is not a video/.test(p)));
   db.close();
 });
 

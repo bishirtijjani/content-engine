@@ -55,23 +55,30 @@ export function deriveSegments(plan, { words = null, narrationBeats = [], minGap
   const dur = r3(plan?.video?.duration ?? (norm.segments.length ? norm.segments[norm.segments.length - 1].end : 60));
 
   // Each authored segment becomes a fixed visual block; a snapshot block is
-  // trimmed to its live window.
-  const blocks = norm.segments.map((seg) => (seg.kind === 'footage'
-    ? { kind: 'footage', start: seg.start, end: seg.end, src: seg }
-    : { kind: 'snapshot', ...liveWindow(seg, words), src: seg }))
-    .sort((a, b) => a.start - b.start);
+  // trimmed to its live window. A clip is exact — its length is the source
+  // footage it plays, so it is never stretched to fill a gap.
+  const blocks = norm.segments.map((seg) => {
+    if (seg.kind === 'footage') return { kind: 'footage', start: seg.start, end: seg.end, src: seg };
+    if (seg.kind === 'clip') return { kind: 'clip', start: seg.start, end: seg.end, src: seg };
+    return { kind: 'snapshot', ...liveWindow(seg, words), src: seg };
+  }).sort((a, b) => a.start - b.start);
 
   // A gap below the threshold is not a cut: hold the previous block across it.
+  // A clip cannot be held (its source runs out), so a clip on either side of the
+  // gap keeps the real gap and the footage between it.
   const merged = [];
   for (const b of blocks) {
     const last = merged[merged.length - 1];
-    if (last && b.start - last.end < minGapSeconds && b.start >= last.end) last.end = b.start;
+    if (last && last.kind !== 'clip' && b.kind !== 'clip'
+      && b.start - last.end < minGapSeconds && b.start >= last.end) last.end = b.start;
     merged.push(b);
   }
 
   // Lead-in and tail: hold the first/last block across a tiny gap, else footage.
-  if (merged.length && merged[0].start > 0 && merged[0].start < minGapSeconds) merged[0].start = 0;
-  if (merged.length && dur - merged[merged.length - 1].end < minGapSeconds) merged[merged.length - 1].end = dur;
+  // Never hold a clip — its on-screen length equals the source it plays.
+  if (merged.length && merged[0].kind !== 'clip' && merged[0].start > 0 && merged[0].start < minGapSeconds) merged[0].start = 0;
+  if (merged.length && merged[merged.length - 1].kind !== 'clip'
+    && dur - merged[merged.length - 1].end < minGapSeconds) merged[merged.length - 1].end = dur;
 
   const out = [];
   let footageN = 0;
@@ -88,13 +95,24 @@ export function deriveSegments(plan, { words = null, narrationBeats = [], minGap
   merged.forEach((b, i) => {
     out.push({ ...b.src, start: r3(b.start), end: r3(b.end) });
     const next = merged[i + 1];
-    if (next && next.start - b.end >= minGapSeconds) pushFootage(b.end, next.start);
+    if (!next) return;
+    // A clip cannot cover a gap, so any real gap beside it becomes footage. Two
+    // snapshots still use the threshold, so the face never flashes between them.
+    const gap = next.start - b.end;
+    const clipEdge = b.kind === 'clip' || next.kind === 'clip';
+    if (clipEdge ? gap > 0.001 : gap >= minGapSeconds) pushFootage(b.end, next.start);
   });
-  if (merged.length && dur - merged[merged.length - 1].end >= minGapSeconds) pushFootage(merged[merged.length - 1].end, dur);
+  if (merged.length && dur - merged[merged.length - 1].end > 0.001
+    && merged[merged.length - 1].kind === 'clip') {
+    pushFootage(merged[merged.length - 1].end, dur);
+  } else if (merged.length && dur - merged[merged.length - 1].end >= minGapSeconds) {
+    pushFootage(merged[merged.length - 1].end, dur);
+  }
 
   // A snapshot must be on screen long enough to read: extend any shorter one by
   // borrowing the time from what follows (a long next b-roll, or the face), so a
   // composition never appears as a sub-second flash between two other visuals.
+  // Never borrow from a clip: its length is the source it plays.
   if (minSnapshotSeconds > 0) {
     let i = 0;
     while (i < out.length) {
@@ -104,6 +122,7 @@ export function deriveSegments(plan, { words = null, narrationBeats = [], minGap
       let probe = i;
       while (need > 0.001 && probe + 1 < out.length) {
         const next = out[probe + 1];
+        if (next.kind === 'clip') break;
         const avail = next.end - next.start;
         const take = Math.min(need, avail);
         seg.end = r3(seg.end + take);
@@ -115,9 +134,9 @@ export function deriveSegments(plan, { words = null, narrationBeats = [], minGap
     }
   }
 
-  // Footage owns the narration spoken over it (for the table).
+  // Each segment owns the narration spoken over it (for the table).
   for (const seg of out) {
-    if (seg.kind !== 'footage') continue;
+    if (seg.kind !== 'footage' && seg.kind !== 'clip') continue;
     seg.lines = narrationBeats
       .filter((n) => n.end > seg.start + 0.05 && n.start < seg.end - 0.05) // overlaps the window
       .map((n) => ({ start: r3(n.start), end: r3(n.end), text: n.text }));

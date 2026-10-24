@@ -176,7 +176,7 @@ npm run clean -- data/item-1 --apply    # cut, after the human approves
 
 The production engine turns one cleaned recording into a finished video. The
 model is **Video → Segments → Beats**: the agent writes a segment plan (footage +
-snapshots); the engine derives the word-timed footage, validates the plan,
+snapshots + clips); the engine derives the word-timed footage, validates the plan,
 renders one still per snapshot plus a contact sheet, and STOPS for the human. On
 approval it builds one composition, renders it, and lays sound under the voice.
 
@@ -257,11 +257,12 @@ The engine owns these; HyperFrames never decides for us.
 
 ### The plan contract — Video → Segments → Beats
 
-The video is an ordered list of SEGMENTS. A segment is either FOOTAGE (you
-talking — the face, no visuals) or a SNAPSHOT (a b-roll section on the orange
-backdrop, ONE completed composition built by its beats). You author the
-snapshots and any footage you want to force; the engine derives the rest of the
-footage word-accurately.
+The video is an ordered list of SEGMENTS. A segment is FOOTAGE (you talking —
+the face, no visuals), a SNAPSHOT (a b-roll section on the orange backdrop, ONE
+completed composition built by its beats), or a CLIP (a real screen recording or
+footage insert, played full-frame and muted under the narration). You author the
+snapshots, clips, and any footage you want to force; the engine derives the rest
+of the footage word-accurately.
 
 ```json
 { "video": { "id": "vid", "duration": 86 },
@@ -276,7 +277,10 @@ footage word-accurately.
           "action": { "op": "introduce", "target": ["head"] } },
         { "id": "b10", "start": 29.2, "end": 36.5, "spoken": "…$25 an hour, that's roughly $2,500",
           "action": { "op": "introduce", "target": ["term-0", "result"], "cue": { "term-0": "$25" } } }
-      ] }
+      ] },
+    { "id": "c1", "kind": "clip", "src": "data/item-4/screen/screenrec1.mp4",
+      "start": 47.7, "end": 55.2, "sourceIn": 0,
+      "why": "show the real personalization screen while the steps are named" }
   ] }
 ```
 
@@ -288,11 +292,21 @@ every remaining stretch — a lead-in, a gap between snapshots, the hook, the ta
 snapshot shorter than `footage.minSnapshotSeconds` (2s) is held longer. The
 emitted plan lists every footage segment with the narration over it.
 
+**A clip is real video, never a still.** A clip plays its source file full-frame,
+1x, muted, for its exact `start`–`end` window; the narration keeps running. Set
+`sourceIn`/`sourceOut` to play a region of the file. The on-screen length must
+equal the source length, and the file must exist and be a video. A clip is never
+stretched or merged across a gap — the gaps around it become footage. Every clip
+needs a one-line `why`.
+
 `validateSnapshotPlan()` refuses: an unknown concept, an empty composition, a
 beat with no `spoken`, a slot no beat introduces, a target that is not a slot of
 the concept, a beat past its segment window, a narration beat not covered by any
-segment, and — given the words — a slot cued on a phrase **not spoken inside its
-own beat**. Nothing renders if the plan fails.
+segment, a clip with no `src`/`why`, a clip whose on-screen length does not match
+its source length, and — given the words — a slot cued on a phrase **not spoken
+inside its own beat**. The engine also refuses a clip whose file is missing or
+not a video, or whose source window runs past the end of the file. Nothing
+renders if the plan fails.
 
 The plan may set `output.orientation` (`"portrait"`/`"landscape"`) to override
 the master's shape; omit it to follow the footage.

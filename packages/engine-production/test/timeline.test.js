@@ -189,3 +189,58 @@ test('motion config resolves deterministic defaults from the style', () => {
   assert.equal(typeof cfg.ease, 'string');
   assert.ok(cfg.countUp > 0);
 });
+
+test('a clip is a root-level muted video with its own source window', () => {
+  const plan = {
+    video: { duration: 20 },
+    segments: [
+      snap('a', 0, 6, 5),
+      { id: 'c1', kind: 'clip', src: 'screenrec1.mp4', start: 6, end: 13.5, sourceIn: 0.5, why: 'show the screen' },
+      snap('b', 13.5, 20, 19),
+    ],
+  };
+  const { html, clips } = buildSnapshotComposition({
+    plan, words: WORDS, videoSrc: 'source.mp4',
+    width: 1080, height: 1920, duration: 20, style: STYLE, orientation: 'portrait',
+    resolveClip: () => 'clip-c1.mp4',
+  });
+  assert.equal(clips, 1);
+  assert.ok(html.includes('<video id="clip-c1" class="clip sc-clip" src="clip-c1.mp4"'));
+  assert.ok(html.includes('data-start="6"'));
+  assert.ok(html.includes('data-duration="7.5"'));
+  assert.ok(html.includes('data-track-index="2" data-media-start="0.5" muted playsinline'));
+  assert.ok(html.includes("tl.set('#a-roll', { opacity: 0 }, 6)"));
+  assert.ok(html.includes("tl.set('#a-roll', { opacity: 1 }, 13.5)"));
+  assert.ok(!html.includes('id="sc-c1"'), 'a clip has no snapshot scene');
+});
+
+test('a clip is exact — it is never stretched or merged across a gap', () => {
+  const plan = {
+    video: { duration: 20 },
+    segments: [
+      snap('a', 0, 5, 5),
+      { id: 'c1', kind: 'clip', src: 'x.mp4', start: 6, end: 13, sourceIn: 0, why: 'show it' },
+      snap('b', 14, 20, 19),
+    ],
+  };
+  const segs = deriveSegments(plan, { minGapSeconds: 3 }).segments;
+  const clip = segs.find((s) => s.id === 'c1');
+  assert.equal(clip.start, 6);
+  assert.equal(clip.end, 13);
+  assert.ok(segs.some((s) => s.kind === 'footage' && Math.abs(s.start - 5) < 0.01 && Math.abs(s.end - 6) < 0.01));
+  assert.ok(segs.some((s) => s.kind === 'footage' && Math.abs(s.start - 13) < 0.01 && Math.abs(s.end - 14) < 0.01));
+});
+
+test('a clip never holds the tail — the remaining time is footage', () => {
+  const plan = {
+    video: { duration: 20 },
+    segments: [
+      snap('a', 0, 5, 5),
+      { id: 'c1', kind: 'clip', src: 'x.mp4', start: 6, end: 13, sourceIn: 0, why: 'show it' },
+    ],
+  };
+  const segs = deriveSegments(plan, {}).segments;
+  const clip = segs.find((s) => s.id === 'c1');
+  assert.equal(clip.end, 13);
+  assert.ok(segs.some((s) => s.kind === 'footage' && Math.abs(s.start - 13) < 0.01 && Math.abs(s.end - 20) < 0.01));
+});

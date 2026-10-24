@@ -24,10 +24,17 @@ export function snapshotPlanTable(raw) {
   const plan = normalizeSnapshotPlan(raw);
   const lines = ['| Segment | Beat | Time | Spoken | Action | Element |', '|---|---|---|---|---|---|'];
   plan.segments.forEach((s, i) => {
-    const label = `**${i + 1} · ${s.section ?? s.concept ?? s.id}${s.kind === 'footage' ? ' · footage' : ''}** (${t(s.start)}–${t(s.end)})`;
+    const label = `**${i + 1} · ${s.section ?? s.concept ?? s.id}${s.kind === 'footage' ? ' · footage' : s.kind === 'clip' ? ' · clip' : ''}** (${t(s.start)}–${t(s.end)})`;
     if (s.kind === 'footage') {
       const text = (Array.isArray(s.lines) ? s.lines : []).map((l) => l.text).filter(Boolean).join('  ').replace(/\|/g, '\\|');
       lines.push(`| ${label} | — | ${t(s.start)}–${t(s.end)} | ${text} | face | you, talking to camera |`);
+      return;
+    }
+    if (s.kind === 'clip') {
+      const text = (Array.isArray(s.lines) ? s.lines : []).map((l) => l.text).filter(Boolean).join('  ').replace(/\|/g, '\\|');
+      const file = String(s.src ?? '').split('/').pop();
+      const from = Number.isFinite(s.sourceIn) ? `${t(s.sourceIn)}s` : '0.0s';
+      lines.push(`| ${label} | — | ${t(s.start)}–${t(s.end)} | ${text} | screen recording · from ${from} | ${file} |`);
       return;
     }
     if (s.beats.length === 0) {

@@ -25,8 +25,9 @@ export const ACTION_OPS = [
 // Ops that land a slot on a narration word (the rest ignore cues).
 const CUE_OPS = new Set(['introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'draw', 'grow', 'pulse']);
 
-// A segment is footage (the face) or a snapshot (a b-roll composition).
-export const SEGMENT_KINDS = ['footage', 'snapshot'];
+// A segment is footage (the face), a snapshot (a b-roll composition), or a
+// clip (a screen recording / real footage insert, played 1x muted).
+export const SEGMENT_KINDS = ['footage', 'snapshot', 'clip'];
 
 // The snapshot recipes (each draws a completed composition).
 export const SNAPSHOT_CONCEPTS = [
@@ -89,9 +90,10 @@ export function normalizeSnapshotPlan(raw) {
       : [];
   const segments = list.map((s) => ({
     ...s,
-    kind: s?.kind === 'footage' ? 'footage' : 'snapshot',
+    kind: s?.kind === 'footage' ? 'footage' : s?.kind === 'clip' ? 'clip' : 'snapshot',
     sceneGraph: s?.sceneGraph || undefined,
     diagram: s?.diagram || undefined,
+    src: s?.src ?? s?.file ?? undefined,
     composition: s?.composition ?? {},
     beats: Array.isArray(s?.beats) ? s.beats.map((b) => ({ ...b, action: b?.action ?? { op: 'introduce' } })) : [],
     transitionOut: s?.transitionOut ?? { technique: 'crossfade' },
@@ -120,6 +122,7 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
   const usedIds = new Set();
   let prevEnd = -Infinity;
   let snapshotCount = 0;
+  let clipCount = 0;
 
   plan.segments.forEach((s, i) => {
     const at = `segments[${i}]`;
@@ -143,6 +146,35 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
     if (typeof s.section !== 'string' && s.section !== undefined) problems.push(`${at}.section must be a string`);
 
     if (s.kind === 'footage') return; // the face; no composition, beats optional
+
+    if (s.kind === 'clip') {
+      clipCount++;
+      // A real clip (screen recording, footage insert) takes the screen for an
+      // exact window. It plays 1x, muted; the narration keeps running under it.
+      if (typeof s.src !== 'string' || !s.src.trim()) {
+        problems.push(`${at} (clip) needs a "src" — the video file to play`);
+      }
+      if (typeof s.why !== 'string' || !s.why.trim()) {
+        problems.push(`${at} (clip) needs a "why" — one plain sentence saying what the clip adds on screen`);
+      }
+      if (s.sourceIn !== undefined && (!isNum(s.sourceIn) || s.sourceIn < 0)) {
+        problems.push(`${at}.sourceIn must be a number >= 0`);
+      }
+      if (s.sourceOut !== undefined && (!isNum(s.sourceOut) || s.sourceOut < 0)) {
+        problems.push(`${at}.sourceOut must be a number >= 0`);
+      }
+      if (isNum(s.sourceIn) && isNum(s.sourceOut) && s.sourceOut <= s.sourceIn) {
+        problems.push(`${at}.sourceOut must be after sourceIn`);
+      }
+      if (isNum(s.start) && isNum(s.end) && isNum(s.sourceIn) && isNum(s.sourceOut)) {
+        const onScreen = s.end - s.start;
+        const fromSource = s.sourceOut - s.sourceIn;
+        if (Math.abs(onScreen - fromSource) > 0.05) {
+          problems.push(`${at} plays ${fromSource.toFixed(2)}s of source but is on screen ${onScreen.toFixed(2)}s — a clip plays 1x`);
+        }
+      }
+      return;
+    }
 
     snapshotCount++;
     const sources = [Boolean(s.sceneGraph), Boolean(s.diagram), Boolean(s.concept)].filter(Boolean).length;
@@ -233,7 +265,9 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
     }
   });
 
-  if (snapshotCount === 0) problems.push('plan has no snapshot segments — a video needs at least one');
+  if (snapshotCount === 0 && clipCount === 0) {
+    problems.push('plan has no snapshot or clip segments — a video needs at least one visual segment');
+  }
 
   // Coverage: every narration beat must live inside some segment window.
   if (Array.isArray(beats) && beats.length) {
@@ -251,6 +285,7 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
 export function summarizeSnapshotPlan(raw) {
   const plan = normalizeSnapshotPlan(raw);
   const snapshots = plan.segments.filter((s) => s.kind === 'snapshot');
+  const clips = plan.segments.filter((s) => s.kind === 'clip');
   const beats = snapshots.reduce((n, s) => n + s.beats.length, 0);
-  return { segments: plan.segments.length, snapshots: snapshots.length, beats };
+  return { segments: plan.segments.length, snapshots: snapshots.length, clips: clips.length, beats };
 }

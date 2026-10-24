@@ -313,6 +313,7 @@ export class ProductionEngine extends BaseEngine {
       orientation,
       fit,
       fps: dims.fps,
+      resolveClip: (clip) => this._clipInto(compositionDir, clip),
     });
     return { html, scenes, beats };
   }
@@ -364,6 +365,10 @@ export class ProductionEngine extends BaseEngine {
     const input = this._snapshotPlanInput(item.id);
     if (!existsSync(input)) throw new Error(`no snapshot plan written — expected ${input}`);
     const plan = JSON.parse(readFileSync(input, 'utf8'));
+    const mediaProblems = this._clipMediaProblems(plan);
+    if (mediaProblems.length) {
+      throw new Error(`snapshot plan is invalid:\n - ${mediaProblems.join('\n - ')}`);
+    }
 
     const dims = this._renderDims(style, 'final', probe, orientation);
     const outDir = path.join(compositionDir, 'plan');
@@ -379,7 +384,7 @@ export class ProductionEngine extends BaseEngine {
     });
     this.log('plan_snapshots', {
       targetType: 'content_item', targetId: item.id,
-      message: `snapshot plan: ${result.summary.segments} segments (${result.summary.snapshots} snapshots), ${result.summary.beats} beats`,
+      message: `snapshot plan: ${result.summary.segments} segments (${result.summary.snapshots} snapshots, ${result.summary.clips} clips), ${result.summary.beats} beats`,
     });
     return { processed: 1, skipped: 0, ...result };
   }
@@ -443,6 +448,7 @@ export class ProductionEngine extends BaseEngine {
     // Re-run the full gates (narration cue/coverage included) at build time.
     const narration = this._narrationFor(item, compositionDir, videoPath);
     const problems = validateSnapshotPlan(snapshotPlan, narration ?? {});
+    problems.push(...this._clipMediaProblems(snapshotPlan));
     if (problems.length) {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'skipped', message: `snapshot plan is invalid: ${problems.join(' | ')}` });
       return { processed: 0, skipped: 1, problems };
@@ -533,6 +539,7 @@ export class ProductionEngine extends BaseEngine {
     // Re-run the full gates (narration cue/coverage included) at build time.
     const narration = this._narrationFor(item, compositionDir, videoPath);
     const problems = validateSnapshotPlan(snapshotPlan, narration ?? {});
+    problems.push(...this._clipMediaProblems(snapshotPlan));
     if (problems.length) {
       this.log('edit', {
         targetType: 'content_item', targetId: item.id, status: 'skipped',
@@ -872,6 +879,58 @@ export class ProductionEngine extends BaseEngine {
       linkOrCopy(videoPath, dest);
     }
     return name;
+  }
+
+  /**
+   * Put a clip next to the composition as `clip-<id><ext>` (hardlinked when the
+   * filesystem allows) and return the name the composition references. The clip
+   * must sit in the composition folder so the renderer can serve it.
+   */
+  _clipInto(compositionDir, clip) {
+    if (!clip?.src) return null;
+    const resolved = this._resolveFootagePath(clip.src);
+    if (!resolved) return null;
+    const name = `clip-${clip.id}${path.extname(resolved)}`;
+    const dest = path.join(compositionDir, name);
+    if (path.resolve(resolved) !== path.resolve(dest) && !existsSync(dest)) {
+      linkOrCopy(resolved, dest);
+    }
+    return name;
+  }
+
+  /**
+   * Refuse clips the renderer cannot play: a file that is not on disk, or a
+   * source window past the end of the clip. Structural checks (1x length, src,
+   * why) live in validateSnapshotPlan; this resolves real files.
+   */
+  _clipMediaProblems(plan) {
+    const problems = [];
+    const segments = Array.isArray(plan?.segments) ? plan.segments : [];
+    segments.forEach((seg, i) => {
+      if (seg?.kind !== 'clip') return;
+      const at = `segments[${i}]`;
+      const resolved = seg.src ? this._resolveFootagePath(seg.src) : null;
+      if (!resolved) {
+        problems.push(`${at} (clip) source not found: ${seg.src || '(missing src)'}`);
+        return;
+      }
+      if (!VIDEO_EXT.has(path.extname(resolved).toLowerCase())) {
+        problems.push(`${at} (clip) is not a video: ${path.basename(resolved)}`);
+        return;
+      }
+      const probe = this._probe(resolved);
+      const total = probe.duration;
+      const srcIn = Number.isFinite(seg.sourceIn) ? seg.sourceIn : 0;
+      const onScreen = Number.isFinite(seg.start) && Number.isFinite(seg.end) ? seg.end - seg.start : 0;
+      const srcOut = Number.isFinite(seg.sourceOut) ? seg.sourceOut : srcIn + onScreen;
+      if (!Number.isFinite(total) || total <= 0) return;
+      if (srcIn >= total) {
+        problems.push(`${at} (clip) sourceIn ${srcIn}s is past the clip end (${total.toFixed(2)}s)`);
+      } else if (srcOut > total + 0.05) {
+        problems.push(`${at} (clip) needs ${srcOut.toFixed(2)}s of source but the clip is ${total.toFixed(2)}s`);
+      }
+    });
+    return problems;
   }
 
   /**

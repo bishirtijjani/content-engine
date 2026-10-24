@@ -57,8 +57,55 @@ test('a well-formed snapshot plan passes', () => {
   assert.deepEqual(validateSnapshotPlan(PLAN), []);
 });
 
-test('summarize counts segments, snapshots and beats', () => {
-  assert.deepEqual(summarizeSnapshotPlan(PLAN), { segments: 3, snapshots: 2, beats: 3 });
+test('summarize counts segments, snapshots, clips and beats', () => {
+  assert.deepEqual(summarizeSnapshotPlan(PLAN), { segments: 3, snapshots: 2, clips: 0, beats: 3 });
+});
+
+const CLIP = {
+  id: 'c1', kind: 'clip', section: 'The screen',
+  src: 'data/item-4/screen/screenrec1.mp4',
+  start: 12, end: 13, sourceIn: 0, sourceOut: 1,
+  why: 'show the real personalization screen while the steps are named',
+};
+
+test('a well-formed clip segment passes', () => {
+  const plan = structuredClone(PLAN);
+  plan.segments.splice(2, 0, structuredClone(CLIP));
+  assert.deepEqual(validateSnapshotPlan(plan), []);
+  assert.deepEqual(summarizeSnapshotPlan(plan), { segments: 4, snapshots: 2, clips: 1, beats: 3 });
+});
+
+test('a clip needs a src and a why', () => {
+  const noSrc = structuredClone(PLAN);
+  noSrc.segments.splice(2, 0, { ...structuredClone(CLIP), src: undefined });
+  assert.ok(validateSnapshotPlan(noSrc).some((p) => /\(clip\) needs a "src"/.test(p)));
+
+  const noWhy = structuredClone(PLAN);
+  noWhy.segments.splice(2, 0, { ...structuredClone(CLIP), why: undefined });
+  assert.ok(validateSnapshotPlan(noWhy).some((p) => /\(clip\) needs a "why"/.test(p)));
+});
+
+test('a clip whose source length does not match its on-screen length is refused', () => {
+  const plan = structuredClone(PLAN);
+  plan.segments.splice(2, 0, { ...structuredClone(CLIP), end: 15 });
+  assert.ok(validateSnapshotPlan(plan).some((p) => /plays 1\.00s of source but is on screen 3\.00s/.test(p)));
+});
+
+test('a clip with sourceOut before sourceIn is refused', () => {
+  const plan = structuredClone(PLAN);
+  plan.segments.splice(2, 0, { ...structuredClone(CLIP), sourceIn: 2, sourceOut: 1 });
+  assert.ok(validateSnapshotPlan(plan).some((p) => /sourceOut must be after sourceIn/.test(p)));
+});
+
+test('a clip-only plan is valid (a video does not need a snapshot if it has a clip)', () => {
+  const plan = {
+    video: { duration: 10 },
+    segments: [
+      { id: 'f1', kind: 'footage', start: 0, end: 2 },
+      { id: 'c1', kind: 'clip', src: 'screen.mp4', start: 2, end: 10, sourceIn: 0, sourceOut: 8, why: 'show the real screen' },
+    ],
+  };
+  assert.deepEqual(validateSnapshotPlan(plan), []);
 });
 
 test('an unknown concept is refused', () => {

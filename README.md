@@ -329,7 +329,7 @@ engine.requestReview({ targetId });              // asset_review gate
 engine.schedule({ targetId });                   // after approval -> scheduled
 ```
 
-- The engine never writes content. The agent writes a **segment plan** (`Video → Segments → Beats`): an ordered list of segments — **FOOTAGE** (the face) and **SNAPSHOT** (one completed b-roll composition each). The engine derives the word-timed footage, validates the plan, renders one still per snapshot plus a contact sheet, and **stops for the human**. On approval it builds one composition, renders it, and lays sound under the voice.
+- The engine never writes content. The agent writes a **segment plan** (`Video → Segments → Beats`): an ordered list of segments — **FOOTAGE** (the face), **SNAPSHOT** (one completed b-roll composition each), and **CLIP** (a real screen recording or footage insert, played full-frame and muted). The engine derives the word-timed footage, validates the plan, renders one still per snapshot plus a contact sheet, and **stops for the human**. On approval it builds one composition, renders it, and lays sound under the voice.
 - **The plan is mandatory and gated.** No video is built without an approved plan: `preview` and `edit` refuse until `snapshot_plan_review` is approved.
 - **Doctrine:** everything on screen must earn its place — on-screen content is narration-supported only (no data the speaker never says). It all sits on the burnt orange canvas; visuals never enter the caption band.
 - `config/style.json` is the ONE style file — colors, fonts, captions, cards, the motion vocabulary, the footage/snapshot timing thresholds, grade.
@@ -337,7 +337,7 @@ engine.schedule({ targetId });                   // after approval -> scheduled
 
 ### The plan contract
 
-A video is authored as **segments**. A **snapshot** is ONE completed composition (a recipe: `title-steps`, `equation`, `keypoint`, `worksheet`, `decision`, `bars`, `quote`, `cta`); its **beats** progressively build it, each revealing a named **slot** on the exact narration word. A **footage** segment is the face — you do not place it by hand; the engine derives it.
+A video is authored as **segments**. A **snapshot** is ONE completed composition (a recipe: `title-steps`, `equation`, `keypoint`, `worksheet`, `decision`, `bars`, `quote`, `cta`); its **beats** progressively build it, each revealing a named **slot** on the exact narration word. A **footage** segment is the face — you do not place it by hand; the engine derives it. A **clip** segment is a real video file (screen recording or b-roll), played full-frame, 1x and muted under the narration.
 
 ```json
 { "video": { "id": "vid", "duration": 86 },
@@ -352,13 +352,18 @@ A video is authored as **segments**. A **snapshot** is ONE completed composition
           "action": { "op": "introduce", "target": ["head"] } },
         { "id": "b10", "start": 29.2, "end": 36.5, "spoken": "…$25 an hour, that's roughly $2,500",
           "action": { "op": "introduce", "target": ["term-0", "result"], "cue": { "term-0": "$25" } } }
-      ] }
+      ] },
+    { "id": "c1", "kind": "clip", "src": "data/item-4/screen/screenrec1.mp4",
+      "start": 47.7, "end": 55.2, "sourceIn": 0,
+      "why": "show the real personalization screen while the steps are named" }
   ] }
 ```
 
 **Footage is derived word-accurately.** A snapshot is on screen only while its content builds and shows (its first body element → its last content word); every remaining stretch — a lead-in, a gap between snapshots, the hook, the tail — becomes footage, snapped to the narration words. A gap shorter than `footage.minGapSeconds` (3s) is not worth a cut: the previous scene holds across it (seamless b-roll). A snapshot on screen shorter than `footage.minSnapshotSeconds` (2s) is held longer, so a b-roll never flashes. The emitted plan lists every footage segment with the narration that plays over it.
 
-`validateSnapshotPlan()` refuses anything off-model: an unknown concept, an empty composition, a beat with no `spoken`, a slot that no beat introduces, a target that is not a slot of the concept, a beat past its segment window, a narration beat not covered by any segment, and — given the words — a slot cued on a phrase **not spoken inside its own beat**. Nothing renders if the plan fails.
+**A clip is real video, never a still.** It plays its `src` full-frame, 1x and muted, for its exact `start`–`end` window while the narration keeps running. `sourceIn`/`sourceOut` select a region of the file; the on-screen length must equal the source length. Clips are never stretched or merged across a gap — the gaps around them become footage.
+
+`validateSnapshotPlan()` refuses anything off-model: an unknown concept, an empty composition, a beat with no `spoken`, a slot that no beat introduces, a target that is not a slot of the concept, a beat past its segment window, a narration beat not covered by any segment, a clip with no `src`/`why` or a clip whose on-screen length does not match its source, and — given the words — a slot cued on a phrase **not spoken inside its own beat**. The engine also refuses a clip whose file is missing or not a video, or whose source window runs past the end of the file. Nothing renders if the plan fails.
 
 ### Beats and cues
 
