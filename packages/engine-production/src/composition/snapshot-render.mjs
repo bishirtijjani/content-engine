@@ -11,8 +11,17 @@ function findChrome() {
   const candidates = [
     process.env.CHROME_PATH,
     process.env.HYPERFRAMES_BROWSER_PATH,
-    '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome',
   ];
+  // Playwright cache: use the newest installed chromium build, never a pinned one.
+  try {
+    const base = '/root/.cache/ms-playwright';
+    const builds = fs.readdirSync(base)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+    for (const d of builds) candidates.push(path.join(base, d, 'chrome-linux64', 'chrome'));
+  } catch {
+    // no playwright cache — the env paths are the only chance
+  }
   return candidates.find((p) => p && fs.existsSync(p));
 }
 

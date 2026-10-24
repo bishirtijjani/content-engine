@@ -1,0 +1,20 @@
+[Unit]
+Description=content-os distribution worker (schedule, publish, media cleanup)
+Documentation=file:///opt/docker/apps/content-os/repo/docs/DISTRIBUTION.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/docker/apps/content-os/repo
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning scripts/distribution-worker.mjs --schedule --publish --cleanup
+User=root
+Group=root
+Environment=CONTENT_OS_ENV_FILE=/opt/docker/apps/content-os/.env
+Environment=NODE_ENV=production
+TimeoutStartSec=45min
+Nice=10
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=content-os-distribution

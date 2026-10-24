@@ -22,6 +22,8 @@ import { deriveSegments } from './footage.mjs';
 import { beatLines, sceneLines, countUpHelper, drawHelper } from './motion.mjs';
 import { loadStyle, loadBackdrop, LEXICON_PATH } from '../style.mjs';
 import { fontFaceCss } from '../fonts.mjs';
+import { deriveBeats } from '../beats.mjs';
+import { synthesizeDiagramBeats } from '../diagrams/beats.mjs';
 import { buildCaptionLayer } from '../build-captions.mjs';
 
 const r3 = (n) => Math.round(n * 1000) / 1000;
@@ -57,7 +59,8 @@ export function buildSnapshotComposition({
   const colors = brand.colors ?? {};
   // The engine derives the visual timeline (footage + snapshots) from the words;
   // footage is a first-class segment, word-timed.
-  const segments = deriveSegments(plan, {
+  const authored = synthesizeDiagramBeats(plan, deriveBeats(words), { style: s });
+  const segments = deriveSegments(authored, {
     words,
     minGapSeconds: s?.footage?.minGapSeconds ?? 3.0,
     minSnapshotSeconds: s?.footage?.minSnapshotSeconds ?? 2.0,
@@ -164,6 +167,14 @@ ${layer.html}
       <audio id="a-roll-audio" src="${esc(videoSrc)}" data-start="0" data-duration="${dur}" data-track-index="10" data-volume="1"></audio>
     </div>
     <script>
+      // HyperFrames seeks the GSAP timeline but not SMIL, so the backdrop would
+      // animate on wall-clock time and appear fast. Drive its clock from hf-seek.
+      window.addEventListener('hf-seek', (e) => {
+        const t = Number(e.detail?.time) || 0;
+        for (const svg of document.querySelectorAll('#backdrop svg, .sc-bg svg')) {
+          try { svg.pauseAnimations(); svg.setCurrentTime(t); } catch (_) {}
+        }
+      });
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
 ${countUpHelper()}

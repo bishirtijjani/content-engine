@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Distribution Engine — adapt, schedule, publish, cross-post",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./publishers": "./src/publishers/index.mjs",
+    "./worker": "./src/worker.mjs",
+    "./media-host": "./src/media-host.mjs",
+    "./credentials": "./src/credentials.mjs"
   },
   "dependencies": {
     "@content-os/core": "*"

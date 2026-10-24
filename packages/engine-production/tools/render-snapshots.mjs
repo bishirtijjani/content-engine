@@ -86,8 +86,17 @@ console.log(`built ${built.scenes} scenes, ${built.beats} beats, ${built.tweens}
 
 const env = { ...process.env };
 if (!env.HYPERFRAMES_BROWSER_PATH) {
-  const chrome = '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome';
-  if (fs.existsSync(chrome)) env.HYPERFRAMES_BROWSER_PATH = chrome;
+  const base = '/root/.cache/ms-playwright';
+  let chrome = null;
+  try {
+    const builds = fs.readdirSync(base)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+    chrome = builds.map((d) => path.join(base, d, 'chrome-linux64', 'chrome')).find((p) => fs.existsSync(p)) ?? null;
+  } catch {
+    chrome = null;
+  }
+  if (chrome) env.HYPERFRAMES_BROWSER_PATH = chrome;
 }
 const r = style?.render ?? {};
 // Finished videos go to data/renders/ like every other render — never beside

@@ -14,6 +14,7 @@ import { deriveSegments } from './footage.mjs';
 import { renderSnapshotStills, renderSnapshotGrid } from './snapshot-render.mjs';
 import { buildScriptWords } from '../script-captions.mjs';
 import { deriveBeats } from '../beats.mjs';
+import { synthesizeDiagramBeats } from '../diagrams/beats.mjs';
 
 const t = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const actionText = (a) => (a?.op === 'hold' ? 'hold' : a?.target ? `${a.op} · ${a.target}` : a.op);
@@ -52,6 +53,9 @@ export function snapshotPlanTable(raw) {
  * @param {string} [opts.htmlDir] - keep rendered HTML here (optional)
  */
 export async function emitSnapshotPlan({ plan, style, outDir, beats = null, words = null, htmlDir = null, width = 1080, height = 1920, orientation = 'portrait' }) {
+  // A diagram segment without hand-authored beats gets its build order spread
+  // across the narration it covers. Timing only; the words stay the speaker's.
+  if (beats) plan = synthesizeDiagramBeats(plan, beats, { style });
   const problems = validateSnapshotPlan(plan, { beats, words });
   if (problems.length) return { ok: false, problems };
 
@@ -98,6 +102,7 @@ export function deriveNarrationBeats({ scriptText, transcriptJson }) {
 export async function planVideo({ plan, style, outDir, scriptText, transcriptJson, htmlDir = null, width = 1080, height = 1920, orientation = 'portrait' }) {
   const beats = deriveNarrationBeats({ scriptText, transcriptJson });
   const words = buildWords(scriptText, transcriptJson);
+  plan = synthesizeDiagramBeats(plan, beats, { style });
   // Derive the visual timeline (footage + snapshots) from the words, so the plan
   // we emit shows exactly where the face plays.
   const derived = deriveSegments(plan, {

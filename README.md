@@ -388,6 +388,32 @@ actionable error instead of minting a new folder.
 
 ---
 
+## Diagram layouts (implemented)
+
+A snapshot segment can carry a **named diagram** instead of a concept recipe:
+
+```json
+{
+  "id": "d3", "kind": "snapshot", "start": 12.4, "end": 27.8,
+  "diagram": {
+    "name": "flow",
+    "spec": { "title": "How the automation runs", "steps": ["Capture", "Classify", "Act"], "active": 2 }
+  }
+}
+```
+
+`name` is one of **58 native layouts** across six families — process, structure, time, charts, narrative and interface. `engine.menu().plan.diagrams` lists every layout with its fields; [docs/DIAGRAMS.md](docs/DIAGRAMS.md) is the full reference.
+
+A diagram is an **authoring layer, not a second renderer**: it compiles to the same scene-graph the snapshot recipes use, so stills, footage derivation, slots, cues and motion work unchanged. Layouts assign stable slot ids (`node-0`, `link-0`, `bar-1`, `cell-0-1`, …); every layout renders in both 9:16 and 16:9 from the same spec. If a diagram segment has no beats, the engine synthesises them from the narration in build order — explicit beats always win.
+
+```bash
+npm run gallery     # data/gallery/index.html — every layout, portrait + landscape, neutral copy
+```
+
+The catalog uses placeholder content only. Layouts read `config/style.json` through `diagrams/theme.mjs`; no brand colour, font, radius or backdrop is defined or overridden there.
+
+---
+
 ## Script renderer
 
 The script renderer takes a shooting script and produces a presentable Markdown document, served in a local browser with a live editor.
@@ -441,6 +467,16 @@ npm run clean -- data/item-1            # propose: print the cut list, cut nothi
 npm run clean -- data/item-1 --apply    # cut, after the human approves
 ```
 
+### Distribution worker
+
+```bash
+node --disable-warning=ExperimentalWarning scripts/distribution-worker.mjs --schedule --publish --cleanup --json
+```
+
+The systemd timer runs this every 5 minutes. Setup, account configuration,
+recovery, and the TikTok/Instagram audit requirements are in
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
 ### Smoke test
 
 ```bash
@@ -489,13 +525,14 @@ content-os/
     ├── engine-production/        implemented — clean → footage → segment plan → approve → render → mix → review
     │   ├── config/style.json     THE locked style (colors, fonts, captions, cards, motion, footage thresholds, grade, clean, voice)
     │   ├── src/                  index.js (engine), menu.mjs, mix.mjs, build-captions.mjs, script-captions.mjs, beats.mjs, style.mjs
-    │   ├── src/composition/      the engine: snapshot-spec, snapshot (recipes), motion, sync, footage (derivation), timeline, snapshot-plan, snapshot-render
+    │   ├── src/composition/      the engine: snapshot-spec, snapshot (recipes), motion, sync, footage (derivation), timeline, snapshot-plan, snapshot-render, scene-graph
+    │   ├── src/diagrams/         58 native layouts (theme, frame, primitives, compile, registry, layouts/*, charts, code tokenizer)
     │   ├── src/diagrams/icons*   the Tabler icon registry (geometry inlined at build time)
     │   ├── tools/clean/          the cleaner CLI (clean.mjs + align.py/place.py/silence.py, lib/cut.mjs, lib/guard.mjs)
-    │   ├── tools/                plan-snapshots.mjs, render-snapshots.mjs, build-icons.mjs, lib/item-dir.mjs (item target resolution)
+    │   ├── tools/                plan-snapshots.mjs, render-snapshots.mjs, build-icons.mjs, diagram-gallery.mjs, lib/item-dir.mjs (item target resolution)
     │   ├── assets/sfx/           reusable sounds
     │   └── backdrop/brand.svg    the designed base layer (grid with depth)
-    ├── engine-distribution/      skeleton — adapt → schedule → publish → cross-post
+    ├── engine-distribution/      implemented — adapt → schedule → publish (Instagram + TikTok), nginx media, worker
     ├── engine-engagement/        skeleton — monitor → classify → reply → escalate
     └── engine-analytics/         skeleton — collect → analyze → insights → playbook
 ```
@@ -505,14 +542,15 @@ content-os/
 ## Testing
 
 ```bash
-npm test                 # 223 tests across core + engine-content + engine-production + lifecycle
+npm test                 # 373 tests across core + engines + lifecycle
 ```
 
 | Package | Tests | What they cover |
 |---|---|---|
 | `@content-os/core` | 21 | Transitions, gates, lifecycle, retry, fast-track, the data layout contract (`paths.js`: one folder per item, adoption/hardlinking, legacy resolution, write guards, renderer scratch pruning) |
 | `@content-os/engine-content` | 39 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
-| `@content-os/engine-production` | 158 | Cleaning (cut list, input guard), footage attach + adoption, the segment plan (spec gates, footage derivation, cue resolution, timeline/motion), snapshot recipes + render, plan-target resolution (`tools/lib/item-dir.mjs`), icons, sfx mix, captions, the full save→plan→approve→build flow, review/resubmit/schedule |
+| `@content-os/engine-production` | 174 | Cleaning (cut list, input guard), footage attach + adoption, the segment plan (spec gates, footage derivation, cue resolution, timeline/motion), snapshot recipes + render, all 58 diagram layouts (compile, slots/build agreement, validation, auto-beats, new scene-graph primitives), plan-target resolution (`tools/lib/item-dir.mjs`), icons, sfx mix, captions, the full save→plan→approve→build flow, review/resubmit/schedule |
+| `@content-os/engine-distribution` | 123 | Copy validation, account eligibility, scheduling/calendar, idempotency, atomic publish leases, Instagram Graph flow and ambiguity-safe recovery, TikTok Direct Post, nginx media, credentials, dry-run immutability, worker lock and partial failures |
 | Lifecycle | 5 | Full lifecycle with all 3 gates, batch production, fast-track, illegal jumps, Markdown rendering |
 
 The cleaning steps also have Python self-tests (not run by `npm test`): `python packages/engine-production/tools/clean/test_align.py` and `test_place.py`.
@@ -539,7 +577,7 @@ The system is seeded with a real brand profile:
 | Content | **Fully implemented** | addIdeas, discover, evaluate (7-dim scoring, persisted), plan (playbook + settings fallbacks), research/script (finalize + structural validation), ready, resubmit |
 | Cleaning | **Implemented** | align (sample-accurate + drift), place, silence (from audio), transcribe, cut list (pauses/fillers/retakes) — `npm run clean` |
 | Production | **Implemented** | process_footage, list_footage, menu, save_snapshot_plan, plan_snapshots (derive + validate + render the plan), approve_snapshot_plan, preview, edit (plan-gated build + render + sfx mix), request_review, resubmit, schedule |
-| Distribution | Stubbed | Contract defined — adapt → schedule → publish → cross-post |
+| Distribution | **Implemented** | adapt (validated platform copy), schedule (timezone, cadence, calendar), publish (Instagram Reels, TikTok Direct Post), restart-safe state, nginx media host, systemd worker |
 | Engagement | Stubbed | Contract defined — monitor → classify → reply → escalate |
 | Analytics | Stubbed | Contract defined — collect → analyze → insights → playbook |
 
@@ -558,13 +596,14 @@ The system is seeded with a real brand profile:
 
 ## Status
 
-- **Foundation:** complete — schema v3, enforced state machine, human gates, batch production model
+- **Foundation:** complete — schema v6, enforced state machine, human gates, batch production model
 - **Content Engine:** production-ready — fresh ideas each cycle, scoring persisted, structural validation on research/scripts, full state coverage (idea → ready_to_shoot) including the revision loop
 - **Cleaning:** implemented — syncs the separate audio to the video (sample-accurate, drift-corrected), measures silence from the audio, and proposes pauses/fillers/repeated takes for approval before cutting; never modifies its inputs
 - **Production Engine:** implemented — footage → agent segment plan → derive + validate + approve → render → sfx mix → review → schedule; the master's orientation follows the footage; one locked style file, the `Video → Segments → Beats` model (word-timed footage derivation, snapshot recipes, cue-on-word reveals)
 - **Content contract:** the engine never writes content — the agent generates ideas, writes research notes and scripts, and writes the production plan; the engine finalizes and requests gates
-- **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing` and `.opencode/skills/clean-recording` skills encode the full loop for any agent tool
-- **Tests:** 193/193 passing
-- **Other engines:** stubbed with clear contracts, ready to build
+- **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing`, `.opencode/skills/clean-recording`, and `.opencode/skills/distribution` encode the full loop for any agent tool
+- **Diagrams:** implemented — 58 native layouts (12 resurrected + 46 new across process, structure, time, charts, narrative and interface); compiled to the scene-graph so slots, cues, motion and both orientations work unchanged; `npm run gallery` renders the catalog
+- **Tests:** 373 tests — 372 pass, 1 skipped (production render test needs Chrome + ffprobe)
+- **Other engines:** Engagement and Analytics remain stubbed with clear contracts.
 
 See [architecture.md](architecture.md) for the recommended build order.

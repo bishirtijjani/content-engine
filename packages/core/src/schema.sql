@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS posts (
   content_item_id INTEGER NOT NULL REFERENCES content_items(id) ON DELETE CASCADE,
   asset_id        INTEGER REFERENCES assets(id) ON DELETE SET NULL,
   platform        TEXT NOT NULL,          -- tiktok | instagram | youtube | linkedin | other
+  account         TEXT NOT NULL DEFAULT 'default',  -- which authorized account on that platform
   status          TEXT NOT NULL DEFAULT 'scheduled',  -- scheduled | published | failed | skipped
   title           TEXT,
   caption         TEXT,
@@ -147,6 +148,9 @@ CREATE TABLE IF NOT EXISTS posts (
   external_id     TEXT,                   -- platform post id after publishing
   url             TEXT,
   publish_error   TEXT,
+  publish_state   TEXT,                   -- JSON: provider state for restart-safe publishing
+  publish_claim_id TEXT,                  -- atomic publish lease owner
+  publish_claim_expires_at TEXT,          -- lease expiry (UTC ISO)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

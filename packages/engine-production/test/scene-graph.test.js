@@ -165,6 +165,97 @@ test('sceneGraphToHtml renders an inline icon on a text node', () => {
   assert.ok(node.includes('Agent'));
 });
 
+test('shape nodes render rect, polygon, line and a donut; unknown shapes are refused', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'rect', type: 'shape', shape: 'rect', r: 20, fill: 'blue', layout: { x: 0, y: 0, w: 0.4, h: 0.1 } },
+      { id: 'dia', type: 'shape', shape: 'diamond', fill: 'amber', layout: { x: 0, y: 0.2, w: 0.3, h: 0.1 } },
+      { id: 'line', type: 'shape', shape: 'line', x1: 0, y1: 0.5, x2: 1, y2: 0.5, stroke: 'white', strokeWidth: 4, layout: { x: 0.1, y: 0.4, w: 0.8, h: 0.02 } },
+      { id: 'ring', type: 'shape', shape: 'donut', inner: 0.6, startAngle: 0, endAngle: 360, fill: 'surface', layout: { x: 0.2, y: 0.6, w: 0.4, h: 0.4 } },
+    ] }],
+  };
+  assert.equal(validateSceneGraph(sg).length, 0);
+  const html = sceneGraphToHtml(sg);
+  assert.ok(html.includes('<rect'));
+  assert.ok(html.includes('<polygon'));
+  assert.ok(html.includes('<line'));
+  assert.ok(html.includes('<path'), 'full donut is a path');
+  const donut = /data-sg="ring"[\s\S]*?<path d="([^"]+)"/.exec(html)[1];
+  assert.equal((donut.match(/ A /g) || []).length, 4, 'two outer and two inner arcs');
+  assert.ok(validateSceneGraph({ scene: {}, nodes: [{ id: 'x', type: 'shape', shape: 'nope' }] }).some((p) => /known shape/.test(p)));
+});
+
+test('a full-sweep pie renders as a circle, not a degenerate arc', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'pie', type: 'shape', shape: 'pie', startAngle: 0, endAngle: 360, fill: 'blue', layout: { x: 0.2, y: 0.2, w: 0.4, h: 0.4 } },
+    ] }],
+  };
+  const html = sceneGraphToHtml(sg);
+  assert.ok(/data-sg="pie"[\s\S]*?<circle/.test(html));
+});
+
+test('a static node is not a slot and is excluded from nodeSlots', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'chrome', type: 'shape', shape: 'rect', static: true, fill: 'ghost', layout: { x: 0, y: 0, w: 1, h: 0.02 } },
+      { id: 'content', type: 'text', text: 'hi', layout: { x: 0, y: 0.1, w: 1, h: 0.1 } },
+    ] }],
+  };
+  assert.deepEqual(validateSceneGraph(sg), []);
+  const html = sceneGraphToHtml(sg);
+  assert.ok(!html.includes('data-slot="chrome"'), 'static chrome is never hidden by the motion sweep');
+  assert.ok(html.includes('data-slot="content"'));
+  assert.ok(!nodeSlots(sg).includes('chrome'));
+  assert.ok(nodeSlots(sg).includes('content'));
+});
+
+test('smooth edges support a start arrow and place the label at the midpoint', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'e', type: 'edge', curve: 'smooth', arrowStart: true, label: 'relates',
+        points: [{ x: 0.2, y: 0.5 }, { x: 0.4, y: 0.35 }, { x: 0.6, y: 0.5 }], layout: { x: 0, y: 0, w: 1, h: 1 } },
+    ] }],
+  };
+  assert.deepEqual(validateSceneGraph(sg), []);
+  const html = sceneGraphToHtml(sg);
+  const d = /<path d="([^"]+)"/.exec(html)[1];
+  assert.ok(d.includes('C'), 'smooth curve uses cubic segments');
+  assert.equal((d.match(/M/g) || []).length, 3, 'line plus two arrowheads');
+  assert.ok(html.includes('left:40%'), 'label sits on the midpoint x');
+  assert.ok(html.includes('top:33%'), 'label sits on the midpoint y, lifted by the default offset');
+});
+
+test('table rows can be individual slots', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'tbl', type: 'table', columns: ['A', 'B'], rows: [['1', '2'], ['3', '4']], rowSlots: true, slot: false },
+    ] }],
+  };
+  assert.deepEqual(validateSceneGraph(sg), []);
+  const html = sceneGraphToHtml(sg);
+  assert.ok(html.includes('data-slot="row-0"'));
+  assert.ok(html.includes('data-slot="row-1"'));
+  assert.deepEqual(nodeSlots(sg).filter((s) => s.startsWith('row-')), ['row-0', 'row-1']);
+});
+
+test('wrapped text breaks lines and ellipsizes the last one', () => {
+  const sg = {
+    scene: { id: 's' },
+    nodes: [{ id: 'root', type: 'group', children: [
+      { id: 'w', type: 'text', text: { value: 'one two three four five six' }, wrap: 10, maxLines: 2, layout: { x: 0, y: 0, w: 1, h: 0.2 } },
+    ] }],
+  };
+  const html = sceneGraphToHtml(sg);
+  assert.ok(html.includes('<br>'));
+  assert.ok(html.includes('…'));
+});
+
 test('validateSceneGraph rejects a bad image src, a short edge, and a bad inline icon', () => {
   assert.ok(validateSceneGraph({ scene: {}, nodes: [{ id: 'x', type: 'image', src: 'nope/missing.png' }] }).some((p) => /resolve/.test(p)));
   assert.ok(validateSceneGraph({ scene: {}, nodes: [{ id: 'x', type: 'image' }] }).some((p) => /src/.test(p)));

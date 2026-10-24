@@ -19,9 +19,13 @@ import { cardBlock, surfaceText, esc } from './primitives.mjs';
 import { sceneGraphToHtml } from './scene-graph.mjs';
 import { loadBackdrop } from '../style.mjs';
 import { renderCaptionCSS } from '../build-captions.mjs';
+import { compileDiagram } from '../diagrams/compile.mjs';
 
 // The one CSS a scene-graph scene needs (its nodes carry their own inline styles).
-const SG_CSS = '.cx-sg{position:absolute;box-sizing:border-box;}';
+const SG_CSS = '.cx-sg{position:absolute;box-sizing:border-box;}' +
+  '.cx-code-p{color:rgba(255,255,255,.85)}.cx-code-k{color:#7DD3FC}.cx-code-s{color:#FCD34D}' +
+  '.cx-code-c{color:rgba(255,255,255,.45);font-style:italic}.cx-code-n{color:#FDBA74}' +
+  '.cx-code-f{color:#C4B5FD}.cx-code-t{color:#86EFAC}';
 
 const FONT = {
   display: 'var(--brand-display)',
@@ -284,8 +288,14 @@ export function composeSnapshot(snapshot, opts) {
  * through its recipe. Both return slot-tagged HTML on the fixed design canvas.
  */
 export function renderSnapshotHtml(snapshot, { style, width, height, orientation = 'portrait' } = {}) {
-  if (snapshot?.sceneGraph) {
-    return { html: sceneGraphToHtml(snapshot.sceneGraph, { width, height, orientation, style }), css: SG_CSS };
+  // A diagram is an authoring layer: compile it to the same scene-graph the
+  // renderer already understands, for this orientation.
+  const sg = snapshot?.sceneGraph
+    ?? (snapshot?.diagram
+      ? compileDiagram({ name: snapshot.diagram.name, spec: snapshot.diagram.spec, style, orientation }).sceneGraph
+      : null);
+  if (sg) {
+    return { html: sceneGraphToHtml(sg, { width, height, orientation, style }), css: SG_CSS };
   }
   return renderSnapshotScene(snapshot, { style, width, height, orientation });
 }

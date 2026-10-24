@@ -13,6 +13,10 @@ CREATE INDEX IF NOT EXISTS idx_links_item           ON content_links(content_ite
 CREATE INDEX IF NOT EXISTS idx_assets_item          ON assets(content_item_id);
 CREATE INDEX IF NOT EXISTS idx_posts_item           ON posts(content_item_id);
 CREATE INDEX IF NOT EXISTS idx_posts_platform_status ON posts(platform, status);
+-- One post per item per platform per account. This is what makes adapt
+-- idempotent at the database level, including two accounts on one platform.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_item_platform_account
+  ON posts(content_item_id, platform, account);
 CREATE INDEX IF NOT EXISTS idx_engagement_status    ON engagement_items(status);
 CREATE INDEX IF NOT EXISTS idx_engagement_conv      ON engagement_items(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_post         ON metrics(post_id);

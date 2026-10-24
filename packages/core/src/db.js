@@ -16,7 +16,7 @@ export const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 export const DEFAULT_DB_PATH = path.join(PROJECT_ROOT, 'data', 'content.db');
 const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 const INDEXES_FILE = path.join(__dirname, 'indexes.sql');
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 7;
 
 // ---------------------------------------------------------------------------
 // Migrations — run after the schema file (which creates new tables with
@@ -54,6 +54,35 @@ const MIGRATIONS = [
       addColumn(db, 'assets', 'orientation', 'TEXT');
     },
   },
+  {
+    version: 5,
+    up(db) {
+      // Which authorized account a post belongs to. One platform can have
+      // several independent accounts (two TikTok accounts, an Instagram
+      // Creator plus a Business account). Existing rows predate accounts and
+      // take the default identity.
+      addColumn(db, 'posts', 'account', "TEXT NOT NULL DEFAULT 'default'");
+    },
+  },
+  {
+    version: 6,
+    up(db) {
+      // Provider-owned publishing progress (container id, stage, media id).
+      // Kept across failures so a retry or restart resumes instead of posting
+      // the same video twice.
+      addColumn(db, 'posts', 'publish_state', 'TEXT');
+    },
+  },
+  {
+    version: 7,
+    up(db) {
+      // Atomic publish lease. A worker or a manual publish must claim a post
+      // before calling a platform, so two processes can never publish it at
+      // once. An expired lease is reclaimable after a crash.
+      addColumn(db, 'posts', 'publish_claim_id', 'TEXT');
+      addColumn(db, 'posts', 'publish_claim_expires_at', 'TEXT');
+    },
+  },
 ];
 
 function addColumn(db, table, column, definition) {
@@ -79,28 +108,128 @@ export function getDbPath() {
   return process.env.CONTENTOS_DB || DEFAULT_DB_PATH;
 }
 
-/** Open a connection (creates the file and parent dirs as needed). */
-export function connect(dbPath) {
+/**
+ * Open a connection and bring the schema to the current version.
+ *
+ * Every engine and script goes through connect(), so a normal startup applies
+ * pending migrations exactly once. A database already at SCHEMA_VERSION with
+ * its indexes is left untouched.
+ *
+ * @param {string} [dbPath] defaults to CONTENTOS_DB or <repo>/data/content.db
+ */
+export function connect(dbPath, { ensure = true } = {}) {
+  const db = openDb(dbPath);
+  try {
+    if (ensure) ensureSchema(db);
+    return db;
+  } catch (err) {
+    try { db.close(); } catch { /* keep the original error */ }
+    throw err;
+  }
+}
+
+/**
+ * Explicit initializer. Kept for callers that name it directly; connect()
+ * already does the same work and is idempotent.
+ */
+export function initDb(dbPath) {
+  return connect(dbPath);
+}
+
+function openDb(dbPath) {
   const p = dbPath || getDbPath();
   mkdirSync(path.dirname(p), { recursive: true });
   const db = new DatabaseSync(p);
   db.exec('PRAGMA foreign_keys = ON');
+  // Concurrent starts wait for each other instead of failing immediately.
+  db.exec('PRAGMA busy_timeout = 5000');
   return db;
 }
 
-/** Create the schema if needed, run migrations, stamp the version. Idempotent. */
-export function initDb(dbPath) {
-  const db = connect(dbPath);
+function ensureSchema(db) {
+  const fresh = !tableExists(db, 'meta');
+  if (!fresh) {
+    const current = schemaVersion(db);
+    if (current >= SCHEMA_VERSION && indexExists(db, 'idx_posts_item_platform_account')) {
+      return;
+    }
+  }
+
+  if (db.isTransaction) {
+    runSchema(db);
+    return;
+  }
+
+  // One transaction covers schema, migrations, the duplicate guard and
+  // indexes. A failure leaves the database exactly as it was.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    runSchema(db);
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* already unwound */ }
+    throw err;
+  }
+}
+
+function runSchema(db) {
   db.exec(readFileSync(SCHEMA_FILE, 'utf8'));
+
+  // The unique index is the last step. Refuse the whole migration when
+  // existing rows would make it impossible, and change nothing.
+  assertNoDuplicatePosts(db);
+
   migrate(db);
-  // Indexes run AFTER migrations: v1 -> v2 adds columns (e.g.
-  // content_items.session_id) that existing databases lack when schema.sql
-  // runs, so indexes referencing them would fail before the migration.
+
+  // Indexes run AFTER migrations: older databases lack columns (for example
+  // content_items.session_id) referenced by the indexes.
   db.exec(readFileSync(INDEXES_FILE, 'utf8'));
+
   db.prepare(
     "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)"
   ).run(String(SCHEMA_VERSION));
-  return db;
+}
+
+function tableExists(db, name) {
+  return Boolean(db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+  ).get(name));
+}
+
+function indexExists(db, name) {
+  return Boolean(db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?"
+  ).get(name));
+}
+
+/**
+ * A duplicate (content_item_id, platform, account) group makes the unique
+ * index impossible. Report it before any schema change. Existing v4 rows have
+ * no account column and would all take 'default', so group on that.
+ */
+function assertNoDuplicatePosts(db) {
+  if (!tableExists(db, 'posts')) return;
+
+  const hasAccount = db.prepare('PRAGMA table_info(posts)').all()
+    .some((column) => column.name === 'account');
+  const account = hasAccount ? "COALESCE(account, 'default')" : "'default'";
+
+  const rows = db.prepare(
+    `SELECT content_item_id, platform, ${account} AS account, COUNT(*) AS n ` +
+    `FROM posts GROUP BY content_item_id, platform, ${account} HAVING n > 1`
+  ).all();
+
+  if (!rows.length) return;
+
+  const duplicates = rows.map(
+    (row) => `item=${row.content_item_id} platform=${row.platform} ` +
+      `account=${row.account} rows=${row.n}`
+  ).join('; ');
+
+  throw new Error(
+    `cannot create the unique posts index — duplicate rows exist: ${duplicates}. ` +
+    'Resolve them manually; nothing was changed.'
+  );
 }
 
 export function schemaVersion(db) {

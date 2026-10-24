@@ -15,14 +15,15 @@
 // This module is the shape + the vocabulary + the gates. It does not render.
 import { resolveCueTime, slotValue, cueFor } from './sync.mjs';
 import { validateSceneGraph, nodeSlots } from './scene-graph.mjs';
+import { validateDiagramSpec, diagramSlots } from '../diagrams/compile.mjs';
 
 // What a beat can do to the composition.
 export const ACTION_OPS = [
-  'introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'highlight', 'draw', 'pulse', 'hold',
+  'introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'highlight', 'draw', 'grow', 'pulse', 'hold',
 ];
 
 // Ops that land a slot on a narration word (the rest ignore cues).
-const CUE_OPS = new Set(['introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'draw', 'pulse']);
+const CUE_OPS = new Set(['introduce', 'reveal', 'move', 'resize', 'restyle', 'retext', 'replace', 'draw', 'grow', 'pulse']);
 
 // A segment is footage (the face) or a snapshot (a b-roll composition).
 export const SEGMENT_KINDS = ['footage', 'snapshot'];
@@ -90,6 +91,7 @@ export function normalizeSnapshotPlan(raw) {
     ...s,
     kind: s?.kind === 'footage' ? 'footage' : 'snapshot',
     sceneGraph: s?.sceneGraph || undefined,
+    diagram: s?.diagram || undefined,
     composition: s?.composition ?? {},
     beats: Array.isArray(s?.beats) ? s.beats.map((b) => ({ ...b, action: b?.action ?? { op: 'introduce' } })) : [],
     transitionOut: s?.transitionOut ?? { technique: 'crossfade' },
@@ -143,9 +145,20 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
     if (s.kind === 'footage') return; // the face; no composition, beats optional
 
     snapshotCount++;
+    const sources = [Boolean(s.sceneGraph), Boolean(s.diagram), Boolean(s.concept)].filter(Boolean).length;
+    if (sources > 1) problems.push(`${at} has more than one visual source (concept, sceneGraph, diagram) — pick one`);
     if (s.sceneGraph) {
       const sgp = validateSceneGraph(s.sceneGraph);
       sgp.forEach((p) => problems.push(`${at}.sceneGraph: ${p}`));
+    } else if (s.diagram) {
+      if (!s.diagram || typeof s.diagram !== 'object') {
+        problems.push(`${at}.diagram must be an object {name, spec}`);
+      } else {
+        if (typeof s.diagram.name !== 'string' || !s.diagram.name.trim()) problems.push(`${at}.diagram needs a "name"`);
+        if (s.diagram.spec != null && typeof s.diagram.spec !== 'object') problems.push(`${at}.diagram.spec must be an object`);
+        const dp = validateDiagramSpec(s.diagram.name, s.diagram.spec ?? {});
+        dp.forEach((p) => problems.push(`${at}.diagram: ${p}`));
+      }
     } else {
       if (!SNAPSHOT_CONCEPTS.includes(s.concept)) {
         problems.push(`${at}.concept "${s.concept}" is not a snapshot concept (${SNAPSHOT_CONCEPTS.join(', ')})`);
@@ -183,12 +196,18 @@ export function validateSnapshotPlan(raw, { beats = null, words = null } = {}) {
       let validSlots;
       if (s.sceneGraph) {
         validSlots = new Set(nodeSlots(s.sceneGraph));
+      } else if (s.diagram) {
+        validSlots = new Set(diagramSlots(s.diagram.name, s.diagram.spec ?? {}));
       } else {
         validSlots = new Set(slotsFor(s.concept, s.composition ?? {}));
       }
       for (const tgt of targets) {
         if (!validSlots.has(tgt)) {
-          const label = s.sceneGraph ? 'is not a valid target for this segment' : `is not a slot of ${s.concept}`;
+          const label = s.sceneGraph
+            ? 'is not a valid target for this segment'
+            : s.diagram
+              ? `is not a slot of diagram "${s.diagram.name}"`
+              : `is not a slot of ${s.concept}`;
           problems.push(`${bat}.action.target "${tgt}" ${label} (${[...validSlots].join(', ')})`);
         }
         introduced.add(tgt);

@@ -331,6 +331,21 @@ Snapshot concepts and their slots (`0..n` = one per array item). A beat's
 | `quote` | head, struck, text | a reframe |
 | `cta` | head, text, handle, sub | the closing ask |
 
+### Diagrams (native layouts)
+
+A snapshot segment can carry a named diagram instead of a concept:
+
+```json
+{ "id": "d3", "kind": "snapshot", "start": 12.4, "end": 27.8,
+  "diagram": { "name": "flow", "spec": { "title": "How it runs", "steps": ["Capture", "Classify", "Act"], "active": 2 } } }
+```
+
+- `engine.menu().plan.diagrams` lists every layout, its fields and its gates. Read it before choosing one.
+- **58 layouts.** Process: `flow`, `pipeline`, `cycle`, `swimlane`, `sequence`, `state-machine`, `fork-join`, `approval-chain`, `decision`. Structure: `architecture`, `hierarchy`, `relationship`, `layers`, `erd`, `data-flow`, `deployment`, `mind-map`, `venn`, `pyramid`, `matrix`, `quadrant`, `treemap`. Time: `timeline`, `funnel`, `gantt`, `calendar`, `milestones`, `before-after`, `journey-map`, `flywheel`. Charts: `table`, `line-chart`, `area-chart`, `scatter`, `pie`, `stacked-bars`, `waterfall`, `sankey`, `heatmap`, `gauge`, `ranking`, `bullet`. Narrative: `comparison`, `pros-cons`, `old-vs-new`, `iceberg`, `spectrum`, `balance`, `bullseye`. Interface: `annotated-screenshot`, `wireframe`, `code`, `terminal`, `chat`, `post`, `map`, `lower-third`, `icon-grid`.
+- Slots are stable across portrait and landscape (`node-0`, `link-0`, `bar-1`, `cell-0-1`, …). Every slot must be introduced by a beat.
+- Leave `beats` empty and the engine synthesises them from the narration in build order; explicit beats always win.
+- `npm run gallery` renders the catalog (`data/gallery/`) with neutral copy. Layouts read the locked style; never introduce a colour or font of your own.
+
 ### Doctrine (required)
 
 Everything on screen must earn its place, and on-screen content must be
@@ -373,6 +388,60 @@ fallback for a concept Tabler does not cover. Rebuild with
 The engine's messages to the human are plain and short. No technical words.
 "Made it. Want to watch?" — not "composition assembled, beat map validated."
 The rule lives in `config/style.json` under `voice`.
+
+## Distribution (approved video → scheduled → published)
+
+The distribution engine schedules and publishes. It never writes copy and never
+approves a human gate. Full setup and recovery: `docs/DISTRIBUTION.md`.
+
+Preconditions:
+
+1. The item is `scheduled` (Production `schedule()` after an approved
+   `asset_review` gate).
+2. The post's asset is `approved`. Publishing re-checks this and refuses
+   anything else.
+3. `settings.distribution.accounts` names every account. Names must match the
+   `.env` names.
+4. The agent has written per-platform copy. `adapt()` validates it; it never
+   generates it.
+
+Flow:
+
+```js
+engine.adapt({ targetId, copy });   // one post per eligible account
+engine.schedule({ targetId });      // UTC slots + calendar rows
+await engine.publish({ targetId }); // due posts, through real publishers
+```
+
+Worker (one pass, systemd timer every 5 minutes):
+
+```bash
+node --disable-warning=ExperimentalWarning scripts/distribution-worker.mjs --schedule --publish --cleanup --json
+```
+
+- The worker takes an exclusive PID lock. A second run exits without working.
+  Lock acquisition is bounded and a live lock older than two hours is replaced.
+- Each post is claimed atomically with a lease (schema v7). A manual publish and
+  the worker cannot publish the same post concurrently. The lease is renewed
+  before every attempt, released on success/failure, and reclaimed after a
+  crash once it expires.
+- `--dry-run` is side-effect-free: no claims, posts, calendar rows,
+  `engine_logs`, media cleanup, or migration. It refuses a database below v7.
+- It logs a `worker` row to `engine_logs` on non-dry passes.
+- It never generates copy. Adaptation requires `--adapt --copy-file <json>`.
+- Instagram uses Graph API v26.0 and enforces 300 MB, 3 seconds to 15 minutes,
+  and 23-60 fps. It polls the container once per minute for up to five minutes.
+  Partial successes such as `config_issue` stay published and are logged.
+- Instagram uses the nginx media host. TikTok uses `FILE_UPLOAD`.
+- Instagram Creator and both TikTok accounts are independent. TikTok public
+  Direct Post requires the Content Posting API audit.
+- Credentials live in `/opt/docker/apps/content-os/.env`, mode 600.
+  `scripts/instagram-auth.mjs` and `scripts/tiktok-auth.mjs --slot N --account NAME`
+  write them. Never ask for tokens in chat.
+- `publish_state` is written before every irreversible step. `adapt()` refuses
+  to erase it while a publish is in progress or unresolved. Check the platform
+  before using `scripts/distribution-worker.mjs --reset-post <id> --confirm`.
+- Tests: `node --disable-warning=ExperimentalWarning --test packages/engine-distribution/test/*.test.js`.
 
 ## Captions
 
@@ -440,9 +509,10 @@ Re-seed with `npm run seed` after editing `scripts/seed-*.mjs`.
 ## Commands
 
 ```
-npm test                                  # 223 tests — must stay green
+npm test                                  # full suite — must stay green
 npm run seed                              # brand + script + idea frameworks
 npm run clean -- data/item-1              # clean a recording (propose; --apply to cut)
+node --disable-warning=ExperimentalWarning scripts/distribution-worker.mjs --schedule --publish --cleanup --json   # distribution pass
 npm --workspace @content-os/engine-production run icons     # rebuild diagrams/icons.generated.mjs (Tabler, MIT)
 node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <id>   # render script
 node --disable-warning=ExperimentalWarning scripts/reset-content.mjs       # purge placeholder content
@@ -467,6 +537,10 @@ node --disable-warning=ExperimentalWarning scripts/migrate-data.mjs --verify    
 5. `docs/FOUNDATION.md` is a historical record — don't update it.
 6. **Visual layers over captions follow the `visual-layer` skill.** Any composition that layers a diagram/chart/graphic on a branded canvas and carries captions must obey it: visuals sit directly on the canvas (no white box), fill the frame (override baked-in `max-width`), scale preserving aspect ratio, never reach the caption band (`top: 72%` is a hard keep-out zone), stay within render timeout weight, and be pre-rendered static SVG (no async diagram rendering).
 7. **The cleaner never modifies its inputs.** It reads the video and the audio and refuses any output path equal to an input. Never run `--apply` without showing the cut list and getting the human's yes.
+8. **Never publish an unapproved asset.** Distribution `publish()` re-checks the asset status and refuses anything that is not `approved`.
+9. **Never clear `publish_state` for an in-progress or ambiguous post.** Check the platform first; only then use `scripts/distribution-worker.mjs --reset-post <id> --confirm`. `adapt()` refuses to change copy while that state exists.
+10. **Never invent platform copy or credentials.** The agent writes copy and passes it to `adapt()`; the setup scripts write credentials to `/opt/docker/apps/content-os/.env` (mode 600).
+11. **The distribution worker never approves gates.** Human approval remains required for `asset_review`.
 
 ## Out of scope for v1 (by design)
 

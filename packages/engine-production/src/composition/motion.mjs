@@ -111,6 +111,14 @@ export function beatLines(beat, { sceneSel, style, segment = null, words = null 
       const d = action.duration ?? cfg.draw;
       lines.push(`tl.set("${sel}", {opacity:1, y:0}, ${at});`);
       lines.push(`__draw("${sel}", ${t}, ${r3(d)});`);
+    } else if (op === 'grow') {
+      // Growth from a baseline: bars rise, horizontal bars extend, pie slices
+      // scale from the centre. `axis` picks the dimension, `origin` the anchor.
+      const axis = action.axis === 'x' ? 'x' : 'y';
+      const origin = action.origin ?? (axis === 'x' ? '0% 50%' : '50% 100%');
+      const prop = axis === 'x' ? 'scaleX' : 'scaleY';
+      lines.push(`tl.set("${sel}", {opacity:1, y:0, transformOrigin:"${origin}", ${prop}:0}, ${at});`);
+      lines.push(`tl.to("${sel}", {${prop}:1, duration:${cfg.in}, ease:"${cfg.ease}"}, ${t});`);
     } else if (op === 'pulse') {
       const p = cfg.pulse;
       const d = action.duration ?? p.duration;

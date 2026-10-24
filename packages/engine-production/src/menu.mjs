@@ -8,6 +8,7 @@ import { loadStyle, framesFor } from './style.mjs';
 import { ICON_NAMES } from './diagrams/icons.mjs';
 import { SUGGESTED_ICONS } from './diagrams/icons.suggested.mjs';
 import { SNAPSHOT_CONCEPTS, ACTION_OPS, FRAMES, TRANSITIONS, SEGMENT_KINDS } from './composition/snapshot-spec.mjs';
+import { listLayouts } from './diagrams/registry.mjs';
 
 export function buildMenu({ style = null, orientation = 'portrait' } = {}) {
   const s = style ?? loadStyle();
@@ -36,6 +37,9 @@ export function buildMenu({ style = null, orientation = 'portrait' } = {}) {
       segmentKinds: SEGMENT_KINDS,
       footage: 'You do not place footage by hand. The engine derives it word-accurately: a snapshot is on screen only while its content builds and shows (from its first body element to its last), and every remaining stretch — a lead-in, a gap between snapshots, the hook, the tail — becomes a footage segment (the face). A gap shorter than the style threshold holds the previous scene instead (seamless b-roll); a snapshot shorter than the snapshot minimum is held longer. The emitted plan lists every footage segment with the narration that plays over it.',
       snapshotConcepts: SNAPSHOT_CONCEPTS,
+      // Named diagram layouts: a segment may carry `diagram:{name,spec}` instead
+      // of a snapshot concept. The layout owns its fields and slot ids.
+      diagrams: listLayouts(),
       beatActions: ACTION_OPS,
       frames: FRAMES,
       transitions: TRANSITIONS,
