@@ -31,19 +31,18 @@ const PLAN = {
       id: 's1', kind: 'snapshot', section: 'The math', concept: 'equation', frame: 'full', start: 1, end: 12,
       transitionOut: { technique: 'crossfade' },
       composition: {
-        kicker: 'The math',
         terms: [{ value: '40', label: 'questions a day' }, { value: '5', unit: 'min', label: 'each' }],
         result: { value: '200', unit: 'min', label: 'a day' },
       },
       beats: [
-        { id: 'b1', start: 1, end: 5, spoken: 'forty times', action: { op: 'introduce', target: ['head', 'term-0', 'term-1'] }, element: 'rows' },
+        { id: 'b1', start: 1, end: 5, spoken: 'forty times', action: { op: 'introduce', target: ['term-0', 'term-1'] }, element: 'rows' },
         { id: 'b2', start: 6, end: 11, spoken: 'equals two hundred', action: { op: 'reveal', target: 'result' }, element: 'result' },
       ],
     },
     {
       id: 's2', kind: 'snapshot', section: 'CTA', concept: 'cta', frame: 'full', start: 13, end: 29,
-      composition: { kicker: 'Start here', text: 'Do the math.', handle: '@iambishir' },
-      beats: [{ id: 'b3', start: 13, end: 28, spoken: 'do the math', action: { op: 'introduce', target: ['head', 'text', 'handle'] }, element: 'cta card' }],
+      composition: { text: 'Do the math.', handle: '@iambishir' },
+      beats: [{ id: 'b3', start: 13, end: 28, spoken: 'do the math', action: { op: 'introduce', target: ['text', 'handle'] }, element: 'cta card' }],
     },
   ],
 };
@@ -146,13 +145,13 @@ test('a non-hold beat with no target is refused', () => {
 
 test('a slot introduced by no beat is refused', () => {
   const bad = structuredClone(PLAN);
-  bad.segments[1].beats[0].action.target = ['term-0', 'term-1']; // 'head' now uncovered
-  assert.ok(validateSnapshotPlan(bad).some((p) => /slot "head" is introduced by no beat/.test(p)));
+  bad.segments[1].beats[0].action.target = ['term-0']; // 'term-1' now uncovered
+  assert.ok(validateSnapshotPlan(bad).some((p) => /slot "term-1" is introduced by no beat/.test(p)));
 });
 
 test('a hold beat needs no target', () => {
   const plan = structuredClone(PLAN);
-  plan.segments[1].beats[0].action = { op: 'introduce', target: ['head', 'term-0', 'term-1', 'result'] };
+  plan.segments[1].beats[0].action = { op: 'introduce', target: ['term-0', 'term-1', 'result'] };
   plan.segments[1].beats[1].action = { op: 'hold' };
   assert.deepEqual(validateSnapshotPlan(plan), []);
 });
@@ -181,9 +180,9 @@ test('cues spoken inside their beats pass; a cue spoken elsewhere is refused', (
   ];
   assert.deepEqual(validateSnapshotPlan(PLAN, { words }), []);
   const bad = structuredClone(PLAN);
-  bad.segments[1].beats[0].action.cue = { head: '200' }; // 200 is spoken in b2, not b1
+  bad.segments[1].beats[0].action.cue = { 'term-0': '200' }; // 200 is spoken in b2, not b1
   const problems = validateSnapshotPlan(bad, { words });
-  assert.ok(problems.some((p) => /"head" is cued on "200", which is not spoken in this beat/.test(p)));
+  assert.ok(problems.some((p) => /"term-0" is cued on "200", which is not spoken in this beat/.test(p)));
 });
 
 test('every concept has a recipe', () => {

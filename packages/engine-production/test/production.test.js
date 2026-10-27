@@ -14,8 +14,8 @@ const SNAP_PLAN = {
   segments: [
     {
       id: 's1', kind: 'snapshot', section: 'Start', concept: 'cta', frame: 'full', start: 0, end: 29,
-      composition: { kicker: 'Start', text: 'Do the math.', handle: '@x' },
-      beats: [{ id: 'b1', start: 0, end: 29, spoken: 'do it', action: { op: 'introduce', target: ['head', 'text', 'handle'] }, element: 'cta' }],
+      composition: { text: 'Do the math.', handle: '@x' },
+      beats: [{ id: 'b1', start: 0, end: 29, spoken: 'do it', action: { op: 'introduce', target: ['text', 'handle'] }, element: 'cta' }],
     },
   ],
 };

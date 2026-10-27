@@ -652,7 +652,6 @@ export function legacyToSceneGraph(snapshot, ctx = {}) {
   const animations = [];
   if (concept === 'bars') {
     const rootChildren = [];
-    rootChildren.push(createTextNode('head', c.kicker, { x: 0.06, y: 0.08, w: 0.88, h: 0.1 }, { 'text-align': 'center', 'font-family': 'var(--brand-display)', 'font-weight': '900', 'font-size': '72px', color: 'var(--brand-text)' }));
     if (c.headline) {
       rootChildren.push(createTextNode('headline', c.headline, { x: 0.06, y: 0.18, w: 0.88, h: 0.08 }, { 'text-align': 'center', 'font-size': '40px', color: 'var(--brand-text)', opacity: '0.9' }));
     }

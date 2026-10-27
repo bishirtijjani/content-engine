@@ -6,8 +6,8 @@
 // a FOOTAGE segment (the face) — snapped to the narration words, so the face and
 // the b-roll interlock perfectly.
 //
-//   - A snapshot is "live" from its first BODY element's word (the kicker always
-//     rides the first body element) to its last content word.
+//   - A snapshot is "live" from its first BODY element's word to its last
+//     content word.
 //   - Everything else — a snapshot's lead-in, the gaps between snapshots, the
 //     hook, the tail — is footage.
 //   - A gap shorter than `minGapSeconds` is not worth a cut: the previous scene
@@ -30,7 +30,6 @@ function liveWindow(seg, words) {
   for (const b of seg.beats) {
     liveEnd = Math.max(liveEnd, b.end);
     for (const slot of targetList(b.action?.target)) {
-      if (slot === 'head') continue; // the kicker never holds the screen alone
       const cue = cueFor(b, slot) ?? slotValue(seg, slot);
       let t = null;
       if (words && cue) t = resolveCueTime(cue, words, { min: seg.start, max: seg.end });

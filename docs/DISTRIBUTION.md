@@ -188,7 +188,7 @@ orientation or `output.orientation`; it does not make per-platform cuts.
 ## TikTok setup
 
 1. Create a TikTok developer app, add Login Kit and Content Posting API.
-2. Request `user.info.basic` and `video.publish`.
+2. Request `user.info.basic`, `video.publish`, and `video.upload`.
 3. Register the redirect URI.
 4. Authorize each account separately:
 

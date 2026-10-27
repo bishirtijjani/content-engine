@@ -5,11 +5,13 @@
   "type": "module",
   "description": "Full content automation engine — content database + 5 independent engines + 3 human gates",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "ui"
   ],
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --test \"packages/*/test/*.test.js\"",
+    "test": "node --disable-warning=ExperimentalWarning --test \"packages/*/test/*.test.js\" \"ui/test/*.test.mjs\"",
     "test:core": "node --disable-warning=ExperimentalWarning --test packages/core/test/",
+    "ui": "node --disable-warning=ExperimentalWarning ui/server.mjs",
     "test:content": "node --disable-warning=ExperimentalWarning --test packages/engine-content/test/",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed-brand.mjs && node --disable-warning=ExperimentalWarning scripts/seed-script-framework.mjs && node --disable-warning=ExperimentalWarning scripts/seed-idea-framework.mjs",
     "demo": "node --disable-warning=ExperimentalWarning demo.mjs",

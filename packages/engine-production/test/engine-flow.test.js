@@ -54,8 +54,8 @@ test('engine flow: save -> plan -> approve -> build', { skip: SKIP }, async () =
     video: { id: 'e2e', item: 1, duration: 6 },
     segments: [{
       id: 's1', kind: 'snapshot', concept: 'cta', frame: 'full', start: 0, end: 6,
-      composition: { kicker: 'Start here', text: 'Do the math across your business.', handle: '@x' },
-      beats: [{ id: 'b1', start: 0, end: 6, spoken: script, action: { op: 'introduce', target: ['head', 'text', 'handle'] }, element: 'cta' }],
+      composition: { text: 'Do the math across your business.', handle: '@x' },
+      beats: [{ id: 'b1', start: 0, end: 6, spoken: script, action: { op: 'introduce', target: ['text', 'handle'] }, element: 'cta' }],
     }],
   };
 

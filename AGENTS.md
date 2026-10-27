@@ -269,12 +269,10 @@ of the footage word-accurately.
   "segments": [
     { "id": "f1", "kind": "footage", "start": 0.1, "end": 4.5 },
     { "id": "s3", "kind": "snapshot", "concept": "equation", "start": 26.3, "end": 42.5,
-      "composition": { "kicker": "The cost",
+      "composition": {
         "terms":  [ { "value": "$25", "unit": "/hr", "label": "a person" } ],
         "result": { "value": "$2,500", "unit": "/mo", "label": "of human time" } },
       "beats": [
-        { "id": "b8",  "start": 26.3, "end": 28.4, "spoken": "Now let's put a cost on those hours.",
-          "action": { "op": "introduce", "target": ["head"] } },
         { "id": "b10", "start": 29.2, "end": 36.5, "spoken": "…$25 an hour, that's roughly $2,500",
           "action": { "op": "introduce", "target": ["term-0", "result"], "cue": { "term-0": "$25" } } }
       ] },
@@ -336,14 +334,14 @@ Snapshot concepts and their slots (`0..n` = one per array item). A beat's
 
 | Concept | Slots | Use it for |
 |---|---|---|
-| `title-steps` | head, headline, step-0..n | a short process / "how to" |
-| `equation` | head, term-0..n, result, note | a cost / math build |
-| `keypoint` | head, text, chip-0..n | one statement + chips |
-| `worksheet` | head, headline, header, row-0..n | a fill-in-the-blank form |
-| `decision` | head, question, branch-0..n | a yes/no test |
-| `bars` | head, headline, bar-0..n | a comparison |
-| `quote` | head, struck, text | a reframe |
-| `cta` | head, text, handle, sub | the closing ask |
+| `title-steps` | headline, step-0..n | a short process / "how to" |
+| `equation` | term-0..n, result, note | a cost / math build |
+| `keypoint` | text, chip-0..n | one statement + chips |
+| `worksheet` | headline, header, row-0..n | a fill-in-the-blank form |
+| `decision` | question, branch-0..n | a yes/no test |
+| `bars` | headline, bar-0..n | a comparison |
+| `quote` | struck, text | a reframe |
+| `cta` | text, handle, sub | the closing ask |
 
 ### Diagrams (native layouts)
 
@@ -528,7 +526,6 @@ npm run seed                              # brand + script + idea frameworks
 npm run clean -- data/item-1              # clean a recording (propose; --apply to cut)
 node --disable-warning=ExperimentalWarning scripts/distribution-worker.mjs --schedule --publish --cleanup --json   # distribution pass
 npm --workspace @content-os/engine-production run icons     # rebuild diagrams/icons.generated.mjs (Tabler, MIT)
-node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <id>   # render script
 node --disable-warning=ExperimentalWarning scripts/reset-content.mjs       # purge placeholder content
 node --disable-warning=ExperimentalWarning scripts/cleanup-db.mjs          # wipe all items/gates/history
 node --disable-warning=ExperimentalWarning scripts/migrate-data.mjs --item <id> [--dry-run]   # fold an item's files into data/item-<id>/

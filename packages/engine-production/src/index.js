@@ -400,6 +400,34 @@ export class ProductionEngine extends BaseEngine {
     return { approved: true };
   }
 
+  /**
+   * Validate a snapshot plan using the engine's actual checks.
+   * Returns { ok, problems, footage }.
+   * @param {number} targetId
+   * @param {object} [plan] - optional plan; defaults to the saved one
+   */
+  validatePlan(targetId, plan = null) {
+    const item = this._item(targetId);
+    const p = plan ?? this._readSnapshotPlan(item.id);
+    if (!p) return { ok: false, problems: ['no plan to validate'], footage: null };
+    const footage = this._primaryFootage(item.id);
+    let problems = [];
+    if (!footage) problems.push('No footage attached — plan cannot be built.');
+    try {
+      let narration = null;
+      if (footage) {
+        const videoPath = path.resolve(PROJECT_ROOT, footage.file_path);
+        const compositionDir = this._compositionDir(item.id);
+        narration = this._narrationFor(item, compositionDir, videoPath);
+      }
+      problems = problems.concat(validateSnapshotPlan(p, narration ? { beats: narration.beats, words: narration.words } : {}));
+      problems = problems.concat(this._clipMediaProblems(p));
+    } catch (e) {
+      problems.push(e.message);
+    }
+    return { ok: problems.length === 0, problems, footage: footage ? footage.file_path : null };
+  }
+
   /** True when the latest snapshot_plan_review gate for the item is approved. */
   snapshotPlanApproved(itemId) {
     const row = this.db.prepare(

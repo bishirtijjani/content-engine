@@ -572,25 +572,13 @@ export class InstagramPublisher {
     if (this._account) return this._account;
 
     const body = await this._graph('GET', `/${this.userId}`, {
-      query: { fields: 'id,username,account_type' },
+      query: { fields: 'id,username' },
     });
-    const type = String(body?.account_type ?? '').toUpperCase();
-
-    if (this.expectedAccountType && type && type !== this.expectedAccountType) {
-      throw new InstagramConfigError(
-        `Instagram account is ${type}, but the configured account type is ${this.expectedAccountType}`
-      );
-    }
-    if (type && !['CREATOR', 'BUSINESS'].includes(type)) {
-      throw new InstagramConfigError(
-        `Instagram account type '${type}' cannot publish. Use a Creator or Business account.`
-      );
-    }
 
     this._account = {
       id: body?.id ?? this.userId,
       username: body?.username ?? null,
-      accountType: type,
+      accountType: null,
     };
     return this._account;
   }

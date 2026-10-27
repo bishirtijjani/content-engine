@@ -54,21 +54,21 @@ export function slotsFor(concept, composition = {}) {
   const c = composition ?? {};
   switch (concept) {
     case 'title-steps':
-      return ['head', ...(c.headline ? ['headline'] : []), ...(c.steps ?? []).map((_, i) => `step-${i}`)];
+      return [...(c.headline ? ['headline'] : []), ...(c.steps ?? []).map((_, i) => `step-${i}`)];
     case 'equation':
-      return ['head', ...(c.terms ?? []).map((_, i) => `term-${i}`), ...(c.result ? ['result'] : []), ...(c.note ? ['note'] : [])];
+      return [...(c.terms ?? []).map((_, i) => `term-${i}`), ...(c.result ? ['result'] : []), ...(c.note ? ['note'] : [])];
     case 'keypoint':
-      return ['head', 'text', ...(c.chips ?? []).map((_, i) => `chip-${i}`)];
+      return ['text', ...(c.chips ?? []).map((_, i) => `chip-${i}`)];
     case 'worksheet':
-      return ['head', ...(c.headline ? ['headline'] : []), 'header', ...Array.from({ length: c.rows ?? 0 }, (_, i) => `row-${i}`)];
+      return [...(c.headline ? ['headline'] : []), 'header', ...Array.from({ length: c.rows ?? 0 }, (_, i) => `row-${i}`)];
     case 'decision':
-      return ['head', 'question', ...(c.branches ?? []).map((_, i) => `branch-${i}`)];
+      return ['question', ...(c.branches ?? []).map((_, i) => `branch-${i}`)];
     case 'bars':
-      return ['head', ...(c.headline ? ['headline'] : []), ...(c.bars ?? []).map((_, i) => `bar-${i}`)];
+      return [...(c.headline ? ['headline'] : []), ...(c.bars ?? []).map((_, i) => `bar-${i}`)];
     case 'quote':
-      return ['head', ...(c.struck ? ['struck'] : []), 'text'];
+      return [...(c.struck ? ['struck'] : []), 'text'];
     case 'cta':
-      return ['head', 'text', ...(c.handle ? ['handle'] : []), ...(c.sub ? ['sub'] : [])];
+      return ['text', ...(c.handle ? ['handle'] : []), ...(c.sub ? ['sub'] : [])];
     default:
       return [];
   }

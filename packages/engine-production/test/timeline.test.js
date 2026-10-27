@@ -17,19 +17,18 @@ const PLAN = {
       id: 's1', kind: 'snapshot', section: 'The math', concept: 'equation', frame: 'full', start: 1, end: 10,
       transitionOut: { technique: 'crossfade' },
       composition: {
-        kicker: 'The math',
         terms: [{ value: '40', label: 'a day' }],
         result: { value: '200', unit: 'min', label: 'a day' },
       },
       beats: [
-        { id: 'b1', start: 1, end: 4, spoken: 'forty', action: { op: 'introduce', target: ['head', 'term-0'] }, element: 'term' },
+        { id: 'b1', start: 1, end: 4, spoken: 'forty', action: { op: 'introduce', target: ['term-0'] }, element: 'term' },
         { id: 'b2', start: 5, end: 9, spoken: 'two hundred', action: { op: 'reveal', target: ['result'] }, element: 'result' },
       ],
     },
     {
       id: 's2', kind: 'snapshot', section: 'CTA', concept: 'cta', frame: 'full', start: 10, end: 20,
-      composition: { kicker: 'Start', text: 'Do the math.', handle: '@iambishir' },
-      beats: [{ id: 'b3', start: 10, end: 19, spoken: 'do it', action: { op: 'introduce', target: ['head', 'text', 'handle'] }, element: 'cta' }],
+      composition: { text: 'Do the math.', handle: '@iambishir' },
+      beats: [{ id: 'b3', start: 10, end: 19, spoken: 'do it', action: { op: 'introduce', target: ['text', 'handle'] }, element: 'cta' }],
     },
   ],
 };
@@ -68,7 +67,7 @@ test('a figure reveals on the exact narration word', () => {
 
 test('an explicit cue phrase resolves to its word inside its own beat', () => {
   const plan = structuredClone(PLAN);
-  plan.segments[1].beats[0].action.cue = { head: 'then' };
+  plan.segments[1].beats[0].action.cue = { 'term-0': 'then' };
   const words = [
     { text: 'the', start: 1.0, end: 1.1 },
     { text: '40', start: 1.2, end: 1.5 },
@@ -76,15 +75,15 @@ test('an explicit cue phrase resolves to its word inside its own beat', () => {
     { text: '200', start: 5.8, end: 6.1 },
   ];
   const { html } = build(plan, words);
-  assert.ok(html.includes(`tl.to("#sc-s1 [data-slot='head']", {opacity:1, y:0, duration:0.5, ease:"power2.out"}, 3)`));
+  assert.ok(html.includes(`tl.to("#sc-s1 [data-slot='term-0']", {opacity:1, y:0, duration:0.5, ease:"power2.out"}, 3)`));
 });
 
 test('a cue spoken in another beat does not pull the reveal out of its beat', () => {
   const segment = structuredClone(PLAN.segments[1]);
-  segment.beats[0].action.cue = { head: 'then' }; // 'then' lives in b2 (5.0s), not b1 [1–4]
+  segment.beats[0].action.cue = { 'term-0': 'then' }; // 'then' lives in b2 (5.0s), not b1 [1–4]
   const { lines } = beatLines(segment.beats[0], { sceneSel: '#sc-s1', style: STYLE, segment, words: WORDS });
-  const headReveal = lines.find((l) => l.includes("[data-slot='head']") && /, 1\);/.test(l));
-  assert.ok(headReveal, 'head falls back to its beat start (1), not the far-away word');
+  const termReveal = lines.find((l) => l.includes("[data-slot='term-0']") && /, 1\);/.test(l));
+  assert.ok(termReveal, 'term-0 falls back to its beat start (1), not the far-away word');
   assert.ok(!lines.some((l) => /, 5\);/.test(l)), 'nothing drifts onto b2');
 });
 
@@ -101,8 +100,8 @@ test('resolveCueTime handles numbers, split currency and phrases', () => {
 
 const snap = (id, start, end, beatEnd) => ({
   id, kind: 'snapshot', concept: 'cta', start, end,
-  composition: { kicker: id, text: id, handle: '@x' },
-  beats: [{ id: `${id}b`, start, end: beatEnd, spoken: id, action: { op: 'introduce', target: ['head', 'text', 'handle'] } }],
+  composition: { text: id, handle: '@x' },
+  beats: [{ id: `${id}b`, start, end: beatEnd, spoken: id, action: { op: 'introduce', target: ['text', 'handle'] } }],
 });
 
 test('a declared footage segment between two snapshots is kept (the face shows)', () => {
@@ -172,7 +171,7 @@ test('numeric slots count up and get the helper', () => {
 
 test('every slot in the composition is tagged', () => {
   const { html } = build();
-  for (const slot of ['head', 'term-0', 'result', 'text', 'handle']) {
+  for (const slot of ['term-0', 'result', 'text', 'handle']) {
     assert.ok(html.includes(`data-slot="${slot}"`), `slot ${slot} tagged`);
   }
 });

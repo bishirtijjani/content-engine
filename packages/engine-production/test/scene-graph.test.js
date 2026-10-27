@@ -52,7 +52,7 @@ test('sceneGraphToHtml emits data-sg for every node and data-slot for non-root s
 });
 
 test('legacyToSceneGraph adapts bars without being a sceneGraph source of truth', () => {
-  const sg = legacyToSceneGraph({ id: 'x', start: 0, end: 4, concept: 'bars', composition: { kicker: 'K', bars: [{ label: 'A', value: 5, max: 10 }] } });
+  const sg = legacyToSceneGraph({ id: 'x', start: 0, end: 4, concept: 'bars', composition: { bars: [{ label: 'A', value: 5, max: 10 }] } });
   assert.equal(validateSceneGraph(sg).length, 0);
   assert.ok(nodeSlots(sg).includes('bar-0'));
 });

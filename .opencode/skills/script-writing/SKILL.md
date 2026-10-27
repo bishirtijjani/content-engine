@@ -105,14 +105,12 @@ Then `engine.script()` — moves to `scripted` + requests `script_review`.
 If the log says `script rejected by structural check — <reason>`, fix exactly
 that and re-run. Do not weaken the script to pass; fix the substance.
 
-### 5. Render for review
+### 5. Review in the UI
 
-```
-node --disable-warning=ExperimentalWarning scripts/serve-script.mjs <itemId>
-```
-
-Opens http://127.0.0.1:3847 — show it to the human for the script_review
-decision. If rejected: edit the script, then `engine.resubmit({ targetId })`.
+Open the item in the control center UI (`ui/`). The UI renders the hook, spoken
+lines, points, CTA and shot notes, and edits save straight back to the DB.
+Show it to the human for the `script_review` decision. If rejected: edit the
+script, then `engine.resubmit({ targetId })`.
 If approved: `engine.ready()` → item lands in `ready_to_shoot`.
 
 `ready()` also creates the item's folder `data/item-<id>/` and writes

@@ -404,6 +404,109 @@ test('adapt: never modifies a published post', () => {
   db.close();
 });
 
+test('adapt: adds a missing platform to an already-published item without touching the published post', () => {
+  const { db, itemId } = setup();
+  const engine = new DistributionEngine(db, { clock });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  const published = db.prepare(
+    "SELECT * FROM posts WHERE platform = 'tiktok' AND account = 'main'"
+  ).get();
+  db.prepare("UPDATE posts SET status = 'published', external_id = 'ext-1' WHERE id = ?").run(published.id);
+  db.prepare("DELETE FROM posts WHERE platform = 'tiktok' AND account = 'clips'").run();
+
+  const result = engine.adapt({
+    targetId: itemId,
+    copy: {
+      ...COPY,
+      'tiktok:main': { caption: 'Replacement caption' },
+    },
+  });
+
+  assert.equal(result.preserved, 1);
+  assert.equal(result.processed, 3);
+
+  const preserved = db.prepare(
+    "SELECT * FROM posts WHERE platform = 'tiktok' AND account = 'main'"
+  ).get();
+  assert.equal(preserved.status, 'published');
+  assert.equal(preserved.caption, 'Main TikTok caption');
+  assert.equal(preserved.external_id, 'ext-1');
+
+  const created = db.prepare(
+    "SELECT * FROM posts WHERE platform = 'tiktok' AND account = 'clips'"
+  ).get();
+  assert.ok(created);
+  assert.equal(created.status, 'scheduled');
+  assert.equal(created.caption, 'TikTok caption');
+  db.close();
+});
+
+test('adapt: repeated adapt on a published item does not duplicate posts', () => {
+  const { db, itemId } = setup();
+  const engine = new DistributionEngine(db, { clock });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  db.prepare(
+    "UPDATE posts SET status = 'published', external_id = 'ext-1' WHERE platform = 'tiktok' AND account = 'main'"
+  ).run();
+
+  const first = engine.adapt({ targetId: itemId, copy: COPY });
+  const second = engine.adapt({ targetId: itemId, copy: COPY });
+
+  assert.equal(first.preserved, 1);
+  assert.equal(second.preserved, 1);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM posts WHERE content_item_id = ?').get(itemId).n,
+    4
+  );
+  db.close();
+});
+
+test('publish: a late platform failure preserves an already-published first platform and retries only the failed post', async () => {
+  const { db, itemId } = setup();
+  const failing = new FakePublisher({ failures: { 'tiktok:clips': 999 } });
+  const engine = new DistributionEngine(db, { publisher: failing, clock, maxAttempts: 1 });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  const clipsId = db.prepare(
+    "SELECT id FROM posts WHERE platform = 'tiktok' AND account = 'clips'"
+  ).get().id;
+  db.prepare(
+    "UPDATE posts SET status = 'published', external_id = 'ext-1' WHERE platform = 'tiktok' AND account = 'main'"
+  ).run();
+  db.prepare("UPDATE content_items SET status = 'published' WHERE id = ?").run(itemId);
+
+  const first = await engine.publish({ postId: clipsId, maxAttempts: 1 });
+  assert.equal(first.failed, 1);
+  assert.equal(first.published, 0);
+  assert.equal(
+    db.prepare("SELECT status FROM posts WHERE platform = 'tiktok' AND account = 'main'").get().status,
+    'published'
+  );
+  assert.equal(
+    db.prepare("SELECT status FROM posts WHERE platform = 'tiktok' AND account = 'clips'").get().status,
+    'failed'
+  );
+  assert.equal(
+    db.prepare('SELECT status FROM content_items WHERE id = ?').get(itemId).status,
+    'published'
+  );
+
+  const healthy = new FakePublisher();
+  const retry = new DistributionEngine(db, { publisher: healthy, clock });
+  const second = await retry.publish({ postId: clipsId });
+
+  assert.equal(second.published, 1);
+  assert.equal(healthy.calls.length, 1);
+  assert.equal(healthy.calls[0].key, 'tiktok:clips');
+  assert.equal(
+    db.prepare('SELECT status FROM content_items WHERE id = ?').get(itemId).status,
+    'published'
+  );
+  db.close();
+});
+
 test('crossPost: uses the same idempotent fan-out as adapt', () => {
   const { db, itemId } = setup();
   const engine = new DistributionEngine(db, { clock });
@@ -675,6 +778,155 @@ test('publish: reconciles a scheduled item whose posts were all published before
   assert.equal(
     db.prepare('SELECT status FROM content_items WHERE id = ?').get(itemId).status,
     'published'
+  );
+  db.close();
+});
+
+test('publish: an inbox upload is recorded as a draft and is not retried', async () => {
+  const { db, itemId } = setup();
+  let calls = 0;
+  const publisher = {
+    async publish() {
+      calls++;
+      return {
+        externalId: 'draft-1',
+        draft: true,
+        manualCompletionRequired: true,
+        url: null,
+        warnings: ['draft-only'],
+      };
+    },
+  };
+  const engine = new DistributionEngine(db, { publisher, clock });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  const result = await engine.publish({ targetId: itemId });
+
+  assert.equal(result.published, 0);
+  assert.equal(result.drafts, 4);
+  assert.equal(result.failed, 0);
+  assert.equal(result.skipped, 0);
+  assert.equal(calls, 4);
+
+  const posts = db.prepare(
+    'SELECT status, external_id, publish_state FROM posts WHERE content_item_id = ? ORDER BY platform, account'
+  ).all(itemId);
+  assert.ok(posts.every((post) => post.status === 'draft' && post.external_id === null));
+  assert.ok(posts.every((post) => JSON.parse(post.publish_state).stage === 'inbox_uploaded'));
+
+  const second = await engine.publish({ targetId: itemId });
+  assert.equal(second.drafts, 0);
+  assert.equal(second.published, 0);
+  assert.equal(calls, 4);
+  db.close();
+});
+
+test('publish: a draft upload failure preserves state and retries only the failed post', async () => {
+  const { db, itemId } = setup();
+  let calls = 0;
+  const failing = {
+    async publish({ state, updateState }) {
+      calls++;
+      if (!state?.publishId) {
+        updateState({ stage: 'initiating', initRequestedAt: '2026-10-21T12:00:00.000Z', mode: 'inbox' });
+        updateState({
+          stage: 'uploading',
+          publishId: 'draft-1',
+          uploadUrl: 'https://upload.test/video',
+          videoSize: 1024,
+          chunkSize: 1024,
+          totalChunks: 1,
+          uploadedBytes: 0,
+          mode: 'inbox',
+        });
+        throw new Error('upload failed');
+      }
+      return {
+        externalId: 'draft-1',
+        draft: true,
+        manualCompletionRequired: true,
+        url: null,
+      };
+    },
+  };
+  const engine = new DistributionEngine(db, { publisher: failing, clock, maxAttempts: 1 });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  const first = await engine.publish({ targetId: itemId, maxAttempts: 1 });
+  assert.equal(first.failed, 4);
+  assert.equal(first.drafts, 0);
+  assert.equal(calls, 4);
+
+  const failed = db.prepare(
+    "SELECT status, publish_state FROM posts WHERE content_item_id = ? AND platform = 'tiktok' AND account = 'clips'"
+  ).get(itemId);
+  assert.equal(failed.status, 'failed');
+  assert.equal(JSON.parse(failed.publish_state).stage, 'uploading');
+
+  const healthy = {
+    async publish({ state }) {
+      calls++;
+      assert.equal(state?.stage, 'uploading');
+      assert.equal(state?.publishId, 'draft-1');
+      return {
+        externalId: 'draft-1',
+        draft: true,
+        manualCompletionRequired: true,
+        url: null,
+      };
+    },
+  };
+  const retry = new DistributionEngine(db, { publisher: healthy, clock });
+  const second = await retry.publish({ targetId: itemId });
+
+  assert.equal(second.drafts, 4);
+  assert.equal(second.failed, 0);
+  assert.equal(calls, 8);
+  assert.equal(healthy.calls?.length ?? 0, 0);
+  const drafted = db.prepare(
+    "SELECT status, external_id, publish_state FROM posts WHERE content_item_id = ? AND platform = 'tiktok' AND account = 'clips'"
+  ).get(itemId);
+  assert.equal(drafted.status, 'draft');
+  assert.equal(drafted.external_id, null);
+  assert.equal(JSON.parse(drafted.publish_state).stage, 'inbox_uploaded');
+  db.close();
+});
+
+test('publish: a draft keeps a scheduled item from settling to published', async () => {
+  const { db, itemId } = setup();
+  const engine = new DistributionEngine(db, {
+    clock,
+    publisher: {
+      async publish() {
+        throw new Error('publisher must not be called for reconciliation');
+      },
+    },
+  });
+  engine.adapt({ targetId: itemId, copy: COPY });
+
+  const posts = db.prepare('SELECT id FROM posts WHERE content_item_id = ? ORDER BY id').all(itemId);
+  for (const post of posts) {
+    db.prepare(
+      "UPDATE posts SET status = 'published', external_id = ?, published_at = ?, " +
+      "updated_at = datetime('now') WHERE id = ?"
+    ).run(`ext-${post.id}`, NOW, post.id);
+  }
+  const draftPost = posts[0].id;
+  db.prepare("UPDATE posts SET status = 'draft', external_id = NULL, publish_state = ? WHERE id = ?").run(
+    JSON.stringify({ stage: 'inbox_uploaded', publishId: 'draft-1' }),
+    draftPost
+  );
+  db.prepare("UPDATE content_items SET status = 'scheduled' WHERE id = ?").run(itemId);
+
+  const result = await engine.publish({ targetId: itemId });
+
+  assert.equal(result.processed, 0);
+  assert.equal(result.published, 0);
+  assert.equal(result.drafts, 0);
+  assert.equal(result.failed, 0);
+  assert.equal(
+    db.prepare('SELECT status FROM content_items WHERE id = ?').get(itemId).status,
+    'scheduled'
   );
   db.close();
 });

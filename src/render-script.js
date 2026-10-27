@@ -1,16 +1,8 @@
-// Script Renderer — turns script data into a presentable, editable document.
+// Script Renderer — turns script data into a presentable Markdown document.
 //
 // Like HyperFrames renders video from HTML, this renders scripts from data.
-// The output is a Markdown document served in a local browser with a live
-// editor. The script IS the deliverable.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-import http from 'node:http';
-import { exec } from 'node:child_process';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const HTML_TEMPLATE = readFileSync(path.join(__dirname, 'template.html'), 'utf8');
+// The output is a Markdown document. The script IS the deliverable; the UI
+// (ui/) is where it is viewed and edited.
 
 // ============================================================================
 // MARKDOWN GENERATION
@@ -132,118 +124,4 @@ export function generateMarkdownFromText(text, item = {}) {
   lines.push(text);
   lines.push('');
   return lines.join('\n');
-}
-
-// ============================================================================
-// HTML RENDERING
-// ============================================================================
-
-/**
- * Build the full HTML page with the Markdown embedded.
- */
-export function buildPage(markdown, itemId) {
-  const escaped = markdown
-    .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
-  return HTML_TEMPLATE
-    .replace('__MARKDOWN_DATA__', escaped)
-    .replace('__ITEM_ID__', String(itemId ?? ''));
-}
-
-// ============================================================================
-// LOCAL SERVER + BROWSER
-// ============================================================================
-
-/**
- * Serve the script in a local browser with live editing.
- * Returns the server so the caller can close it.
- *
- * @param {string} markdown - the initial Markdown content
- * @param {number} itemId - the content_items ID (for saving back)
- * @param {import('node:sqlite').DatabaseSync} db - database connection
- * @param {Object} [opts]
- * @param {number} [opts.port] - port to use (default: 3847)
- * @returns {Promise<{ server, port, url }>}
- */
-export function serveScript(markdown, itemId, db, opts = {}) {
-  return new Promise((resolve) => {
-    const port = opts.port ?? 3847;
-    let currentMarkdown = markdown;
-
-    const server = http.createServer((req, res) => {
-      // CORS headers for local dev
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
-      // GET — serve the page
-      if (req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(buildPage(currentMarkdown, itemId));
-        return;
-      }
-
-      // POST — save edits
-      if (req.method === 'POST') {
-        let body = '';
-        req.on('data', (chunk) => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const { markdown: newMd } = JSON.parse(body);
-            currentMarkdown = newMd;
-
-            // Write back to the database
-            if (db && itemId) {
-              db.prepare(
-                "UPDATE content_items SET script = ?, updated_at = datetime('now') WHERE id = ?"
-              ).run(newMd, itemId);
-            }
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-          } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: err.message }));
-          }
-        });
-        return;
-      }
-
-      res.writeHead(404);
-      res.end();
-    });
-
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.error(`\n  port ${port} is already in use — is another script renderer running?`);
-        console.error(`  kill it or pass a different port:\n    node scripts/serve-script.mjs <id> --port 3848\n`);
-      } else {
-        console.error(`\n  server error: ${err.message}\n`);
-      }
-      process.exit(1);
-    });
-
-    server.listen(port, '127.0.0.1', () => {
-      const url = `http://127.0.0.1:${port}`;
-      console.log(`\n  script ready: ${url}`);
-      console.log('  edit in the browser, then save (Ctrl+S or click Save)');
-      console.log('  close the tab or press Ctrl+C to stop\n');
-
-      // Open browser
-      const platform = process.platform;
-      const cmd = platform === 'win32' ? `start "" "${url}"`
-        : platform === 'darwin' ? `open "${url}"`
-        : `xdg-open "${url}"`;
-      exec(cmd, () => {});
-
-      resolve({ server, port, url });
-    });
-  });
 }

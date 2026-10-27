@@ -1,11 +1,10 @@
 // Live demo: the agent (the brain) drives the Content Engine (the muscle).
 //
 // Flow: approve idea gates → run deterministic stages → the agent writes the
-// content (research notes + finished script) → the engine finalizes → render
-// the script in the browser.
+// content (research notes + finished script) → the engine finalizes → review
+// the script in the UI (ui/).
 import { connect, decideGate } from '@content-os/core';
 import { ContentEngine } from '@content-os/engine-content';
-import { generateMarkdown, serveScript } from './src/render-script.js';
 
 const db = connect();
 const engine = new ContentEngine(db);
@@ -67,13 +66,10 @@ if (candidate) {
   );
   engine.script({ targetId: candidate.id });
 
-  // Render the agent-written script in the browser
+  // Review the agent-written script in the UI (ui/)
   const item = db.prepare('SELECT * FROM content_items WHERE id = ?').get(candidate.id);
-  const md = generateMarkdown(item.script, item);
-  console.log(`\n--- Rendering script #${item.id} in browser ---`);
-  await serveScript(md, item.id, db);
-  process.on('SIGINT', () => { db.close(); process.exit(0); });
-  process.on('SIGTERM', () => { db.close(); process.exit(0); });
+  console.log(`\n--- Script #${item.id} ready — review and edit it in the UI (ui/) ---`);
+  db.close();
 } else {
   console.log('\nNo planned items to script. Status distribution:');
   const statuses = db.prepare('SELECT status, COUNT(*) as n FROM content_items GROUP BY status').all();

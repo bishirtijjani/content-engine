@@ -82,8 +82,10 @@ export class DistributionEngine extends BaseEngine {
     const result = { processed: 0, skipped: 0, preserved: 0, posts: [] };
 
     for (const item of items) {
-      if (item.status !== 'scheduled') {
-        this._logSkip('adapt', item.id, `item is '${item.status}', expected 'scheduled'`, dryRun);
+      // A published item may still need a newly configured platform/account.
+      // Existing posts are preserved; only missing posts are created.
+      if (item.status !== 'scheduled' && item.status !== 'published') {
+        this._logSkip('adapt', item.id, `item is '${item.status}', expected 'scheduled' or 'published'`, dryRun);
         result.skipped++;
         continue;
       }
@@ -259,7 +261,7 @@ export class DistributionEngine extends BaseEngine {
 
     const posts = this._duePosts({ targetId, postId, now });
     const attempts = Math.max(1, Number(maxAttempts) || this.maxAttempts);
-    const result = { processed: 0, published: 0, failed: 0, skipped: 0, posts: [] };
+    const result = { processed: 0, published: 0, failed: 0, skipped: 0, drafts: 0, posts: [] };
 
     for (const post of posts) {
       if (dryRun) {
@@ -376,7 +378,30 @@ export class DistributionEngine extends BaseEngine {
         }
 
         result.processed++;
-        if (delivered) {
+        if (delivered?.draft) {
+          this._markDraft(claimed.id, delivered.externalId, delivered.url ?? null);
+          result.drafts++;
+          const warnings = Array.isArray(delivered.warnings) ? delivered.warnings : [];
+          result.posts.push({
+            id: claimed.id, platform: claimed.platform, account: claimed.account,
+            status: 'draft',
+            draft: true,
+            manualCompletionRequired: delivered.manualCompletionRequired !== false,
+            draftId: delivered.externalId,
+            warnings,
+          });
+          this.log('publish', {
+            targetType: 'post', targetId: claimed.id,
+            message: `uploaded ${claimed.platform}:${claimed.account} to TikTok inbox as ${delivered.externalId}; manual completion required`,
+          });
+          if (warnings.length) {
+            this.log('publish', {
+              targetType: 'post', targetId: claimed.id,
+              message: `uploaded ${claimed.platform}:${claimed.account} as ${delivered.externalId} ` +
+                `with warnings: ${warnings.join('; ')}`,
+            });
+          }
+        } else if (delivered) {
           this._markPublished(claimed.id, now, delivered.externalId, delivered.url ?? null);
           result.published++;
           const warnings = Array.isArray(delivered.warnings) ? delivered.warnings : [];
@@ -418,8 +443,8 @@ export class DistributionEngine extends BaseEngine {
       this._settleItems([...touched]);
       this._reconcileSettledItems();
       this.log('publish', {
-        message: `${result.published} published, ${result.failed} failed, ` +
-          `${result.skipped} skipped`,
+        message: `${result.published} published, ${result.drafts} draft(s), ` +
+          `${result.failed} failed, ${result.skipped} skipped`,
       });
     }
     return result;
@@ -500,6 +525,9 @@ export class DistributionEngine extends BaseEngine {
 
   _scheduledItems(targetId) {
     if (targetId) {
+      // An explicitly requested item may already be published on another
+      // platform; late platform posts still need to be adapted without moving
+      // the item or its existing posts.
       return [this._item(targetId)];
     }
     return this.db.prepare(
@@ -605,7 +633,7 @@ export class DistributionEngine extends BaseEngine {
     const clauses = [
       "p.status IN ('scheduled', 'failed')",
       'p.external_id IS NULL',
-      "i.status = 'scheduled'",
+      "i.status IN ('scheduled', 'published')",
     ];
     const params = [];
     if (postId) {
@@ -655,6 +683,19 @@ export class DistributionEngine extends BaseEngine {
       "UPDATE posts SET status = 'failed', publish_error = ?, " +
       "updated_at = datetime('now') WHERE id = ?"
     ).run(message, postId);
+  }
+
+  _markDraft(postId, draftId, url = null) {
+    const state = {
+      stage: 'inbox_uploaded',
+      publishId: draftId,
+      url: url ?? null,
+      uploadedAt: this._nowIso(),
+    };
+    this.db.prepare(
+      "UPDATE posts SET status = 'draft', publish_state = ?, publish_error = NULL, " +
+      "updated_at = datetime('now') WHERE id = ?"
+    ).run(JSON.stringify(state), postId);
   }
 
   /**
@@ -718,7 +759,7 @@ export class DistributionEngine extends BaseEngine {
         counts[row.status] = row.n;
       }
 
-      const pending = (counts.scheduled ?? 0) + (counts.failed ?? 0);
+      const pending = (counts.scheduled ?? 0) + (counts.failed ?? 0) + (counts.draft ?? 0);
       if ((counts.published ?? 0) > 0 && pending === 0) {
         transition(this.db, itemId, 'published', {
           actor: `engine:${this.name}`,
@@ -740,7 +781,7 @@ export class DistributionEngine extends BaseEngine {
       'AND EXISTS (SELECT 1 FROM posts p ' +
       "WHERE p.content_item_id = ci.id AND p.status = 'published') " +
       'AND NOT EXISTS (SELECT 1 FROM posts p ' +
-      "WHERE p.content_item_id = ci.id AND p.status IN ('scheduled', 'failed')) " +
+      "WHERE p.content_item_id = ci.id AND p.status IN ('scheduled', 'failed', 'draft')) " +
       'ORDER BY ci.id'
     ).all();
 

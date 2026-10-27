@@ -169,12 +169,11 @@ calendar_entries ── references content_items / posts / sessions
 
 ## The agent interface
 
-No CLI. No API server. The agent (OpenWork, Claude Code, etc.) IS the orchestrator. The engine is the muscle; the agent is the brain; the script renderer is the output.
+No CLI. No API server. The agent (OpenWork, Claude Code, etc.) IS the orchestrator. The engine is the muscle; the agent is the brain; the UI (`ui/`) is where scripts are reviewed and edited.
 
 ```js
 import { connect, decideGate, listGates } from '@content-os/core';
 import { ContentEngine } from '@content-os/engine-content';
-import { generateMarkdown, serveScript } from './src/render-script.js';
 
 const db = connect();
 const engine = new ContentEngine(db);
@@ -215,10 +214,7 @@ db.prepare(
 ).run(script);
 engine.script();    // validates structure + length, finalizes + requests script gate
 
-// Render the agent-written script in the browser
-const item = db.prepare("SELECT * FROM content_items WHERE id = 1").get();
-const md = generateMarkdown(item.script, item);
-await serveScript(md, item.id, db);
+// Review and edit the agent-written script in the UI (ui/)
 ```
 
 ### Individual actions
@@ -344,12 +340,10 @@ A video is authored as **segments**. A **snapshot** is ONE completed composition
   "segments": [
     { "id": "f1", "kind": "footage", "start": 0.1, "end": 4.5 },
     { "id": "s3", "kind": "snapshot", "concept": "equation", "start": 26.3, "end": 42.5,
-      "composition": { "kicker": "The cost",
+      "composition": {
         "terms":  [ { "value": "$25", "unit": "/hr", "label": "a person" } ],
         "result": { "value": "$2,500", "unit": "/mo", "label": "of human time" } },
       "beats": [
-        { "id": "b8",  "start": 26.3, "end": 28.4, "spoken": "Now let's put a cost on those hours.",
-          "action": { "op": "introduce", "target": ["head"] } },
         { "id": "b10", "start": 29.2, "end": 36.5, "spoken": "…$25 an hour, that's roughly $2,500",
           "action": { "op": "introduce", "target": ["term-0", "result"], "cue": { "term-0": "$25" } } }
       ] },
@@ -419,24 +413,11 @@ The catalog uses placeholder content only. Layouts read `config/style.json` thro
 
 ---
 
-## Script renderer
+## Script review
 
-The script renderer takes a shooting script and produces a presentable Markdown document, served in a local browser with a live editor.
+Scripts are reviewed and edited in the UI (`ui/`), not a separate local server. The UI reads and writes `content_items.script` through its API, and renders the hook, spoken lines, points, CTA and shot notes for review.
 
-```js
-import { generateMarkdown, serveScript } from './src/render-script.js';
-
-const item = db.prepare("SELECT * FROM content_items WHERE id = 1").get();
-const md = generateMarkdown(item.script, item);
-await serveScript(md, item.id, db);  // opens http://127.0.0.1:<port>
-```
-
-Features:
-- Dark theme, responsive layout
-- `marked.js` for Markdown rendering
-- Live editor (toggle with Ctrl+E)
-- Save back to DB (Ctrl+S or click Save)
-- Auto-generates title page from item metadata
+`generateMarkdown()` in `src/render-script.js` remains a pure helper for producing a Markdown document from a script when a file export is needed.
 
 ---
 
@@ -497,10 +478,10 @@ content-os/
 ├── package.json                  workspace root (scripts: test)
 ├── architecture.md               full system design
 ├── README.md                     this file
-├── demo.mjs                      live demo (agent calls engine, renders script)
+├── demo.mjs                      live demo (agent calls engine, script ready for the UI)
 ├── src/
-│   ├── render-script.js          script renderer (Markdown + browser viewer)
-│   └── template.html             HTML template for live script editing
+│   └── render-script.js          Markdown export helper (scripts are viewed in ui/)
+├── ui/                           local control center (view/edit scripts, plans, renders)
 ├── data/                         generated content — content.db, inbox/, item-<id>/, renders/, tmp/ (never committed; see "Data layout")
 ├── scripts/
 │   ├── seed-brand.mjs            seed brand settings (ideas are generated fresh by the agent)
@@ -509,7 +490,6 @@ content-os/
 │   ├── smoke-pipeline.mjs        end-to-end smoke test
 │   ├── migrate-data.mjs          fold an item's files into data/item-<id>/ (--item <id>, --dry-run, --all, --verify)
 │   ├── reset-content.mjs         purge placeholder content, reset items to agent-ready state
-│   └── serve-script.mjs          render an item's script in the browser (node scripts/serve-script.mjs <id> [--port 3848])
 └── packages/
     ├── core/                     THE CONTRACT — schema, state machine, gates, db layer
     │   ├── src/
@@ -547,7 +527,7 @@ content-os/
 ## Testing
 
 ```bash
-npm test                 # 373 tests across core + engines + lifecycle
+npm test                 # 405 tests across core + engines + lifecycle
 ```
 
 | Package | Tests | What they cover |
@@ -555,7 +535,7 @@ npm test                 # 373 tests across core + engines + lifecycle
 | `@content-os/core` | 21 | Transitions, gates, lifecycle, retry, fast-track, the data layout contract (`paths.js`: one folder per item, adoption/hardlinking, legacy resolution, write guards, renderer scratch pruning) |
 | `@content-os/engine-content` | 39 | Fresh ideas, scoring persistence, plan defaults, research/script validation, ready/resubmit, pipeline, playbook, idempotency |
 | `@content-os/engine-production` | 174 | Cleaning (cut list, input guard), footage attach + adoption, the segment plan (spec gates, footage derivation, cue resolution, timeline/motion), snapshot recipes + render, all 58 diagram layouts (compile, slots/build agreement, validation, auto-beats, new scene-graph primitives), plan-target resolution (`tools/lib/item-dir.mjs`), icons, sfx mix, captions, the full save→plan→approve→build flow, review/resubmit/schedule |
-| `@content-os/engine-distribution` | 123 | Copy validation, account eligibility, scheduling/calendar, idempotency, atomic publish leases, Instagram Graph flow and ambiguity-safe recovery, TikTok Direct Post, nginx media, credentials, dry-run immutability, worker lock and partial failures |
+| `@content-os/engine-distribution` | 145 | Copy validation, account eligibility, scheduling/calendar, idempotency, atomic publish leases, Instagram Graph flow and ambiguity-safe recovery, TikTok Direct Post, nginx media, credentials, dry-run immutability, worker lock and partial failures |
 | Lifecycle | 5 | Full lifecycle with all 3 gates, batch production, fast-track, illegal jumps, Markdown rendering |
 
 The cleaning steps also have Python self-tests (not run by `npm test`): `python packages/engine-production/tools/clean/test_align.py` and `test_place.py`.
@@ -608,7 +588,7 @@ The system is seeded with a real brand profile:
 - **Content contract:** the engine never writes content — the agent generates ideas, writes research notes and scripts, and writes the production plan; the engine finalizes and requests gates
 - **Agent ergonomics:** `AGENTS.md` operating manual + `.opencode/skills/script-writing`, `.opencode/skills/clean-recording`, and `.opencode/skills/distribution` encode the full loop for any agent tool
 - **Diagrams:** implemented — 58 native layouts (12 resurrected + 46 new across process, structure, time, charts, narrative and interface); compiled to the scene-graph so slots, cues, motion and both orientations work unchanged; `npm run gallery` renders the catalog
-- **Tests:** 373 tests — 372 pass, 1 skipped (production render test needs Chrome + ffprobe)
+- **Tests:** 405 tests — 404 pass, 1 skipped (production render test needs Chrome + ffprobe)
 - **Other engines:** Engagement and Analytics remain stubbed with clear contracts.
 
 See [architecture.md](architecture.md) for the recommended build order.

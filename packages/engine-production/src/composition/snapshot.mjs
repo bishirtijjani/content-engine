@@ -66,7 +66,6 @@ function figureEl(text, { size = 150, color = 'var(--brand-text)', slot = null }
 }
 
 const S = {
-  kicker: (t, slot) => line(t, { size: 30, weight: 800, tracking: 0.22, caps: true, opacity: 0.85, slot }),
   headline: (t, color, slot) => line(t, { font: 'display', size: 84, weight: 900, lh: 1.04, color, slot }),
   figure: (t, opts) => figureEl(t, opts),
   label: (t, color, slot) => line(t, { size: 36, weight: 600, color, lh: 1.2, slot }),
@@ -88,16 +87,7 @@ function stageCss(safe) {
   return `
     .cx-stage{position:absolute;left:${safe.x}px;top:${safe.y}px;width:${safe.w}px;height:${safe.h}px;
       display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:2;gap:${Math.round(safe.h * 0.035)}px}
-    .cx-head{display:flex;flex-direction:column;align-items:center;gap:${Math.round(safe.h * 0.014)}px}
     .cx-card{position:relative}`;
-}
-
-/** The shared head: kicker + a short rule. */
-function head(snapshot) {
-  const items = [];
-  if (snapshot.kicker) items.push(S.kicker(snapshot.kicker));
-  items.push(`<div style="width:64px;height:4px;border-radius:2px;background:var(--brand-text);opacity:.9"></div>`);
-  return `<div class="cx-head" data-slot="head">${items.join('')}</div>`;
 }
 
 // ---- recipes (each returns the snapshot's finished composition) ------------
@@ -117,7 +107,6 @@ function titleSteps(sn) {
     )
     .join('');
   return `
-    ${head(sn)}
     ${sn.headline ? S.headline(sn.headline, 'var(--brand-text)', 'headline') : ''}
     <div style="display:flex;flex-direction:column;gap:24px;width:100%">${cards}</div>`;
 }
@@ -148,7 +137,6 @@ function equation(sn) {
       )
     : '';
   return `
-    ${head(sn)}
     <div style="display:flex;flex-direction:column;gap:16px;width:100%">${rows.join('')}${note}</div>`;
 }
 
@@ -158,7 +146,6 @@ function keypoint(sn) {
     .map((c, i) => cardBlock(S.label(c, 'var(--brand-blue)'), { tone: 'amber', padX: 32, padY: 18, radius: 999, slot: `chip-${i}` }))
     .join('');
   return `
-    ${head(sn)}
     ${cardBlock(`<div style="text-align:center">${S.headline(sn.text, 'var(--brand-text)')}</div>`, { tone: 'blue', padX: 64, padY: 56, radius: 48, slot: 'text' })}
     ${chips ? `<div style="display:flex;gap:20px">${chips}</div>` : ''}`;
 }
@@ -180,7 +167,6 @@ function worksheet(sn) {
     )
     .join('');
   return `
-    ${head(sn)}
     ${sn.headline ? S.headline(sn.headline, 'var(--brand-text)', 'headline') : ''}
     <div style="display:flex;flex-direction:column;gap:18px;width:100%">${header}${rows}</div>`;
 }
@@ -206,7 +192,6 @@ function bars(sn) {
     })
     .join('');
   return `
-    ${head(sn)}
     ${sn.headline ? S.headline(sn.headline, 'var(--brand-text)', 'headline') : ''}
     <div style="display:flex;flex-direction:column;gap:18px;width:100%">${rows}</div>`;
 }
@@ -217,7 +202,6 @@ function decision(sn) {
     .map((b, i) => cardBlock(S.label(b.text, surfaceText(b.tone ?? 'ghost')), { tone: b.tone ?? 'ghost', padX: 44, padY: 30, radius: 34, slot: `branch-${i}` }))
     .join('');
   return `
-    ${head(sn)}
     ${cardBlock(`<div style="text-align:center">${S.headline(sn.question, 'var(--brand-text)')}</div>`, { tone: 'blue', padX: 60, padY: 50, radius: 44, slot: 'question' })}
     <div style="display:flex;gap:24px;flex-wrap:wrap;justify-content:center">${branches}</div>`;
 }
@@ -229,7 +213,6 @@ function quote(sn) {
          <div style="position:absolute;left:-3%;top:54%;width:106%;height:7px;border-radius:3px;background:var(--brand-orange);transform:rotate(-3deg)"></div></div>`
     : '';
   return `
-    ${head(sn)}
     ${struck}
     ${cardBlock(`<div style="text-align:center">${line(sn.text, { size: 56, weight: 600, lh: 1.3, color: 'var(--brand-text)' })}</div>`, { tone: 'blue', padX: 64, padY: 56, radius: 48, slot: 'text' })}`;
 }
@@ -237,7 +220,6 @@ function quote(sn) {
 /** A closing call to action. */
 function cta(sn) {
   return `
-    ${head(sn)}
     ${cardBlock(`<div style="text-align:center">${S.headline(sn.text, 'var(--brand-text)')}</div>`, { tone: 'blue', padX: 64, padY: 56, radius: 48, slot: 'text' })}
     ${sn.handle ? cardBlock(S.label(sn.handle, 'var(--brand-blue)'), { tone: 'amber', padX: 40, padY: 22, radius: 999, slot: 'handle' }) : ''}
     ${sn.sub ? S.label(sn.sub, 'var(--brand-text)', 'sub') : ''}`;

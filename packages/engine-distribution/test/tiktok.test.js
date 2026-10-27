@@ -52,6 +52,18 @@ const uploadRoute = {
   response: { status: 201, body: null },
 };
 
+const inboxInitRoute = {
+  method: 'POST',
+  match: (href) => new URL(href).pathname === '/v2/post/publish/inbox/video/init/',
+  response: {
+    data: {
+      publish_id: 'draft-1',
+      upload_url: 'https://upload.test/video?token=secret',
+    },
+    error: { code: 'ok', message: '', log_id: 'log' },
+  },
+};
+
 const statusRoute = (data) => ({
   method: 'POST',
   match: (href) => new URL(href).pathname === '/v2/post/publish/status/fetch/',
@@ -79,6 +91,7 @@ function harness({
   maxAttempts = 3,
   maxPollMs = 5000,
   pollIntervalMs = 1000,
+  mode = 'direct',
 } = {}) {
   const file = videoFile();
   let current = new Date(NOW);
@@ -113,6 +126,7 @@ function harness({
     timeoutMs: 1000,
     maxAttempts,
     privacyLevel: 'PUBLIC_TO_EVERYONE',
+    mode,
     onTokenRefresh,
     logger: null,
   });
@@ -312,12 +326,28 @@ test('tiktok: a failed status is terminal and clears the upload state', async ()
 test('tiktok: chunk planning follows the official limits', () => {
   assert.deepEqual(planChunks(4 * 1024 * 1024), { chunkSize: 4 * 1024 * 1024, totalChunks: 1 });
   assert.deepEqual(planChunks(100 * 1024 * 1024), {
-    chunkSize: 50 * 1024 * 1024,
+    chunkSize: 64 * 1024 * 1024,
     totalChunks: 2,
+  });
+  assert.deepEqual(planChunks(64 * 1024 * 1024), {
+    chunkSize: 64 * 1024 * 1024,
+    totalChunks: 1,
+  });
+  assert.deepEqual(planChunks(65 * 1024 * 1024), {
+    chunkSize: 64 * 1024 * 1024,
+    totalChunks: 2,
+  });
+  assert.deepEqual(planChunks(128 * 1024 * 1024), {
+    chunkSize: 64 * 1024 * 1024,
+    totalChunks: 2,
+  });
+  assert.deepEqual(planChunks(129 * 1024 * 1024), {
+    chunkSize: 64 * 1024 * 1024,
+    totalChunks: 3,
   });
   assert.deepEqual(planChunks(130 * 1024 * 1024), {
     chunkSize: 64 * 1024 * 1024,
-    totalChunks: 2,
+    totalChunks: 3,
   });
 });
 
@@ -415,5 +445,293 @@ test('composer: a missing second TikTok account does not break the first', async
   await assert.rejects(
     publisher.publish({ platform: 'tiktok', account: 'clips', post: {}, asset: {}, item: {} }),
     (err) => err.name === 'TikTokConfigError' && /no TikTok credentials/.test(err.message)
+  );
+});
+
+
+test('tiktok: inbox upload initializes the inbox endpoint and records a manual-completion draft', async () => {
+  const h = harness({
+    mode: 'inbox',
+    routes: [
+      creatorRoute,
+      inboxInitRoute,
+      uploadRoute,
+      statusSequence([{ status: 'SEND_TO_USER_INBOX' }]),
+    ],
+  });
+
+  const result = await publish(h);
+
+  assert.deepEqual(result, {
+    externalId: 'draft-1',
+    draft: true,
+    manualCompletionRequired: true,
+    url: null,
+  });
+
+  const init = h.fetchImpl.calls.find((call) =>
+    new URL(call.url).pathname === '/v2/post/publish/inbox/video/init/'
+  );
+  assert.ok(init);
+  const body = JSON.parse(init.body);
+  assert.deepEqual(body.source_info, {
+    source: 'FILE_UPLOAD',
+    video_size: 1024 * 1024,
+    chunk_size: 1024 * 1024,
+    total_chunk_count: 1,
+  });
+  assert.equal(body.post_info, undefined);
+
+  const directInit = h.fetchImpl.calls.find((call) =>
+    new URL(call.url).pathname === '/v2/post/publish/video/init/'
+  );
+  assert.equal(directInit, undefined);
+
+  assert.equal(h.getState().stage, 'inbox_uploaded');
+  assert.equal(h.getState().publishId, 'draft-1');
+  assert.equal(h.getState().uploadedAt, NOW);
+});
+
+test('tiktok: inbox upload resumes an interrupted upload without reinitializing', async () => {
+  const h = harness({
+    mode: 'inbox',
+    state: {
+      stage: 'uploading',
+      publishId: 'draft-1',
+      uploadUrl: 'https://upload.test/video?token=secret',
+      videoSize: 1024 * 1024,
+      chunkSize: 1024 * 1024,
+      totalChunks: 1,
+      uploadedBytes: 0,
+      mode: 'inbox',
+    },
+    routes: [
+      creatorRoute,
+      uploadRoute,
+      statusSequence([{ status: 'SEND_TO_USER_INBOX' }]),
+    ],
+  });
+
+  const result = await publish(h);
+
+  assert.deepEqual(result, {
+    externalId: 'draft-1',
+    draft: true,
+    manualCompletionRequired: true,
+    url: null,
+  });
+  assert.equal(
+    h.fetchImpl.calls.filter((call) => new URL(call.url).pathname === '/v2/post/publish/inbox/video/init/').length,
+    0
+  );
+  assert.equal(h.fetchImpl.calls.filter((call) => call.method === 'PUT').length, 1);
+});
+
+test('tiktok: an already accepted inbox upload is not uploaded twice', async () => {
+  const h = harness({
+    mode: 'inbox',
+    state: {
+      stage: 'inbox_uploaded',
+      publishId: 'draft-1',
+      url: null,
+      uploadedAt: NOW,
+      mode: 'inbox',
+    },
+    routes: [
+      creatorRoute,
+      statusSequence([{ status: 'SEND_TO_USER_INBOX' }]),
+    ],
+  });
+
+  const result = await publish(h);
+
+  assert.deepEqual(result, {
+    externalId: 'draft-1',
+    draft: true,
+    manualCompletionRequired: true,
+    url: null,
+  });
+  assert.equal(h.fetchImpl.calls.filter((call) => call.method === 'PUT').length, 0);
+  assert.equal(
+    h.fetchImpl.calls.filter((call) => new URL(call.url).pathname === '/v2/post/publish/inbox/video/init/').length,
+    0
+  );
+});
+
+test('tiktok: inbox upload init failure clears state for a definite rejection', async () => {
+  const h = harness({
+    mode: 'inbox',
+    routes: [
+      creatorRoute,
+      {
+        method: 'POST',
+        match: (href) => new URL(href).pathname === '/v2/post/publish/inbox/video/init/',
+        response: {
+          status: 403,
+          body: {
+            error: {
+              code: 'scope_not_authorized',
+              message: 'missing video.upload',
+              log_id: 'log',
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(publish(h), (err) => err.name === 'TikTokAuthError');
+  assert.equal(h.getState(), null);
+  assert.equal(h.fetchImpl.calls.filter((call) => call.method === 'PUT').length, 0);
+});
+
+test('tiktok: inbox upload failure leaves resumable upload state', async () => {
+  const h = harness({
+    mode: 'inbox',
+    maxAttempts: 1,
+    routes: [
+      creatorRoute,
+      inboxInitRoute,
+      {
+        method: 'PUT',
+        match: (href) => new URL(href).host === 'upload.test',
+        response: { status: 500, body: null },
+      },
+    ],
+  });
+
+  await assert.rejects(publish(h));
+  assert.equal(h.getState().stage, 'uploading');
+  assert.equal(h.getState().publishId, 'draft-1');
+  assert.equal(h.getState().uploadedBytes, 0);
+});
+
+test('tiktok: inbox upload reports a failed upload status and clears state', async () => {
+  const h = harness({
+    mode: 'inbox',
+    routes: [
+      creatorRoute,
+      inboxInitRoute,
+      uploadRoute,
+      statusSequence([{ status: 'FAILED', fail_reason: 'internal' }]),
+    ],
+  });
+
+  await assert.rejects(publish(h), (err) => err.code === 'INBOX_UPLOAD_FAILED');
+  assert.equal(h.getState(), null);
+});
+
+test('tiktok: an inbox upload with an ambiguous initiating state is not reinitialized', async () => {
+  let initCalls = 0;
+  const h = harness({
+    mode: 'inbox',
+    state: {
+      stage: 'initiating',
+      initRequestedAt: NOW,
+      mode: 'inbox',
+    },
+    routes: [
+      {
+        method: 'POST',
+        match: (href) => new URL(href).pathname === '/v2/post/publish/inbox/video/init/',
+        response: () => {
+          initCalls++;
+          return inboxInitRoute.response;
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(
+    publish(h),
+    (err) => err.code === 'AMBIGUOUS_TIKTOK_INIT'
+  );
+  assert.equal(h.getState().stage, 'initiating');
+  assert.equal(initCalls, 0);
+});
+
+test('tiktok: inbox upload does not require privacy options it does not send', async () => {
+  const noPrivacyCreator = {
+    method: 'POST',
+    match: (href) => new URL(href).pathname === '/v2/post/publish/creator_info/query/',
+    response: {
+      data: {
+        creator_username: 'creator',
+        creator_nickname: 'Creator',
+        privacy_level_options: [],
+        max_video_post_duration_sec: 600,
+      },
+      error: { code: 'ok', message: '', log_id: 'log' },
+    },
+  };
+  const h = harness({
+    mode: 'inbox',
+    routes: [
+      noPrivacyCreator,
+      inboxInitRoute,
+      uploadRoute,
+      statusSequence([{ status: 'SEND_TO_USER_INBOX' }]),
+    ],
+  });
+
+  const result = await publish(h);
+  assert.equal(result.draft, true);
+  assert.equal(result.externalId, 'draft-1');
+});
+
+test('tiktok: direct post still requires privacy options', async () => {
+  const noPrivacyCreator = {
+    method: 'POST',
+    match: (href) => new URL(href).pathname === '/v2/post/publish/creator_info/query/',
+    response: {
+      data: {
+        creator_username: 'creator',
+        creator_nickname: 'Creator',
+        privacy_level_options: [],
+        max_video_post_duration_sec: 600,
+      },
+      error: { code: 'ok', message: '', log_id: 'log' },
+    },
+  };
+  const h = harness({
+    mode: 'direct',
+    routes: [noPrivacyCreator],
+  });
+
+  await assert.rejects(
+    publish(h),
+    (err) => err.name === 'TikTokConfigError' && /privacy_level_options/.test(err.message)
+  );
+});
+
+test('tiktok: an accepted inbox upload re-verifies the creator before status', async () => {
+  const h = harness({
+    mode: 'inbox',
+    state: {
+      stage: 'inbox_uploaded',
+      publishId: 'draft-1',
+      url: null,
+      uploadedAt: NOW,
+      mode: 'inbox',
+    },
+    routes: [
+      creatorRoute,
+      statusSequence([{ status: 'SEND_TO_USER_INBOX' }]),
+    ],
+  });
+
+  const result = await publish(h);
+  assert.equal(result.draft, true);
+  assert.equal(
+    h.fetchImpl.calls.filter((call) =>
+      new URL(call.url).pathname === '/v2/post/publish/creator_info/query/'
+    ).length,
+    1
+  );
+  assert.equal(
+    h.fetchImpl.calls.filter((call) =>
+      new URL(call.url).pathname === '/v2/post/publish/status/fetch/'
+    ).length,
+    1
   );
 });

@@ -58,12 +58,12 @@ export class TikTokPublisher {
     logger = null,
   } = {}) {
     if (!account) throw new TikTokConfigError('TikTok account name is required');
-    if (mode !== 'direct') {
+    if (mode !== 'direct' && mode !== 'inbox' && mode !== 'draft') {
       throw new TikTokConfigError(
-        'TikTok inbox upload requires manual completion in the TikTok app and is not ' +
-        'an unattended publish. Use direct mode after the app audit.'
+        `TikTok mode must be 'direct', 'inbox', or 'draft' (received '${mode}')`
       );
     }
+    if (mode === 'draft') mode = 'inbox';
     if (!clientKey || !clientSecret) {
       throw new TikTokConfigError('TikTok clientKey and clientSecret are required');
     }
@@ -83,6 +83,7 @@ export class TikTokPublisher {
     this.expiresAt = expiresAt;
     this.refreshExpiresAt = refreshExpiresAt;
     this.apiBase = String(apiBase).replace(/\/+$/, '');
+    this.mode = mode;
     this.privacyLevel = privacyLevel;
     this.fetchImpl = fetchImpl;
     this.sleep = sleep;
@@ -112,6 +113,10 @@ export class TikTokPublisher {
       updateState(patch === null ? null : this._state);
     };
 
+    if (this.mode === 'inbox') {
+      return this._publishInbox(post, asset);
+    }
+
     const current = this._state;
     if (current.stage === 'published' && current.publishId) {
       return this._publishedResult(current);
@@ -133,6 +138,140 @@ export class TikTokPublisher {
     }
 
     return this._start(post, media);
+  }
+
+  async _publishInbox(post, asset) {
+    const current = this._state;
+
+    if (current.stage === 'inbox_uploaded' && current.publishId) {
+      await this._ensureToken();
+      const media = this._mediaInfo(asset);
+      await this._verifyCreator(media);
+      return this._pollInbox(post);
+    }
+
+    // An init request may have reached TikTok even though no publish_id was
+    // saved. Do not initialize a second upload; require manual recovery.
+    if (current.stage === 'initiating' && !current.publishId) {
+      throw new TikTokAmbiguousInitError(
+        'A TikTok inbox upload initialization was started but no publish_id was saved.'
+      );
+    }
+
+    await this._ensureToken();
+    const media = this._mediaInfo(asset);
+    await this._verifyCreator(media);
+
+    if (current.publishId) {
+      if (current.stage === 'uploading' || Number(current.uploadedBytes ?? 0) < media.size) {
+        await this._upload(media);
+      }
+      return this._pollInbox(post);
+    }
+
+    this._updateState({
+      stage: 'initiating',
+      initRequestedAt: this.clock().toISOString(),
+      mode: 'inbox',
+    });
+
+    let init;
+    try {
+      init = await this._api('POST', '/v2/post/publish/inbox/video/init/', {
+        body: {
+          source_info: {
+            source: 'FILE_UPLOAD',
+            video_size: media.size,
+            chunk_size: media.chunkSize,
+            total_chunk_count: media.totalChunks,
+          },
+        },
+      });
+    } catch (err) {
+      if (isDefinitiveInitFailure(err)) {
+        this._updateState(null);
+        throw err;
+      }
+      throw new TikTokAmbiguousInitError(
+        `TikTok inbox upload initialization failed without a definite rejection: ${err.message}`
+      );
+    }
+
+    const data = init?.data ?? {};
+    if (!data.publish_id || !data.upload_url) {
+      throw new TikTokAmbiguousInitError(
+        'TikTok accepted the inbox initialization but returned no publish_id or upload_url.'
+      );
+    }
+
+    this._updateState({
+      stage: 'uploading',
+      publishId: data.publish_id,
+      uploadUrl: data.upload_url,
+      videoSize: media.size,
+      chunkSize: media.chunkSize,
+      totalChunks: media.totalChunks,
+      uploadedBytes: 0,
+      mode: 'inbox',
+    });
+
+    await this._upload(media);
+    return this._pollInbox(post);
+  }
+
+  async _pollInbox(post) {
+    this._updateState({ stage: 'processing', uploadedBytes: this._state.uploadedBytes ?? 0 });
+
+    const deadline = this.clock().getTime() + this.maxPollMs;
+    const maxPolls = Math.ceil(this.maxPollMs / this.pollIntervalMs) + 1;
+
+    for (let poll = 0; poll < maxPolls; poll++) {
+      const publishId = this._state.publishId;
+      const body = await this._api('POST', '/v2/post/publish/status/fetch/', {
+        body: { publish_id: publishId },
+      });
+      const data = body?.data ?? {};
+      const status = data.status;
+
+      if (status === 'SEND_TO_USER_INBOX' || status === 'PUBLISH_COMPLETE') {
+        this._updateState({
+          stage: 'inbox_uploaded',
+          publishId,
+          url: null,
+          uploadedAt: this.clock().toISOString(),
+        });
+        return {
+          externalId: String(publishId),
+          draft: true,
+          manualCompletionRequired: true,
+          url: null,
+        };
+      }
+
+      if (status === 'FAILED') {
+        const reason = data.fail_reason || 'unknown';
+        this._updateState(null);
+        throw new TikTokError(`TikTok inbox upload failed: ${reason}`, {
+          retryable: reason === 'internal' || reason === 'video_pull_failed',
+          code: 'INBOX_UPLOAD_FAILED',
+          status: 200,
+        });
+      }
+
+      if (status !== 'PROCESSING_UPLOAD' && status !== 'PROCESSING_DOWNLOAD') {
+        throw new TikTokError(`Unexpected TikTok status '${status ?? 'missing'}'`, {
+          retryable: true, code: 'UNKNOWN_STATUS',
+        });
+      }
+
+      if (this.clock().getTime() >= deadline) break;
+      await this.sleep(this.pollIntervalMs);
+    }
+
+    throw new TikTokError(
+      'TikTok is still processing the inbox upload. The upload will resume on the next attempt.',
+      { retryable: true, code: 'INBOX_PROCESSING_TIMEOUT' }
+    );
   }
 
   async _start(post, media) {
@@ -227,7 +366,8 @@ export class TikTokPublisher {
         `Video is ${media.duration}s; this TikTok account allows ${maxDuration}s`
       );
     }
-    if (!Array.isArray(data.privacy_level_options) || !data.privacy_level_options.length) {
+    if (this.mode === 'direct' &&
+        (!Array.isArray(data.privacy_level_options) || !data.privacy_level_options.length)) {
       throw new TikTokConfigError('TikTok returned no privacy_level_options for this account');
     }
   }
@@ -668,10 +808,10 @@ export function planChunks(size) {
   if (size <= CHUNK_MAX) return { chunkSize: size, totalChunks: 1 };
 
   let chunkSize = CHUNK_MAX;
-  let totalChunks = Math.floor(size / chunkSize);
+  let totalChunks = Math.ceil(size / chunkSize);
   if (totalChunks < 2) {
     chunkSize = Math.ceil(size / 2);
-    totalChunks = Math.max(2, Math.floor(size / chunkSize));
+    totalChunks = Math.max(2, Math.ceil(size / chunkSize));
   }
   return { chunkSize, totalChunks };
 }

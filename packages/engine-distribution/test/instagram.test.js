@@ -17,8 +17,8 @@ const VERSION = 'v26.0';
 const accountRoute = {
   method: 'GET',
   match: (href) => graphPath(href) === `/${VERSION}/1784`
-    && graphQuery(href).get('fields')?.includes('account_type'),
-  response: { id: '1784', username: 'creator', account_type: 'CREATOR' },
+    && graphQuery(href).get('fields') === 'id,username',
+  response: { id: '1784', username: 'creator' },
 };
 
 const quotaRoute = {
@@ -304,7 +304,7 @@ test('instagram: refreshes a token close to expiry and uses the new token', asyn
   assert.equal(oauthCall.headers.Authorization, undefined);
 
   const accountCall = h.fetchImpl.calls.find((call) =>
-    graphPath(call.url) === `/${VERSION}/1784` && graphQuery(call.url).get('fields')?.includes('account_type')
+    graphPath(call.url) === `/${VERSION}/1784` && graphQuery(call.url).get('fields') === 'id,username'
   );
   assert.equal(accountCall.headers.Authorization, 'Bearer new-token');
 });

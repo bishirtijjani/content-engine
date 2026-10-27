@@ -6,7 +6,8 @@
   "description": "Production Engine — raw footage to finished platform assets",
   "exports": {
     ".": "./src/index.js",
-    "./tools/lib/captions.mjs": "./tools/lib/captions.mjs"
+    "./tools/lib/captions.mjs": "./tools/lib/captions.mjs",
+    "./src/composition/snapshot-spec.mjs": "./src/composition/snapshot-spec.mjs"
   },
   "scripts": {
     "icons": "node tools/build-icons.mjs",

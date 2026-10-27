@@ -1,0 +1,20 @@
+{
+  "name": "@content-os/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Content OS control center UI",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@content-os/core": "*",
+    "@content-os/engine-content": "*",
+    "@content-os/engine-production": "*",
+    "@content-os/engine-distribution": "*",
+    "@content-os/engine-engagement": "*",
+    "@content-os/engine-analytics": "*"
+  }
+}

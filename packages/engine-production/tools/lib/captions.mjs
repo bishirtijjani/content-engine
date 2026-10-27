@@ -144,6 +144,60 @@ export function repairLeadingOrphan(caps, o) {
   return caps;
 }
 
+/**
+ * Guarantee the hard limits validateCaptions() enforces, after the clause
+ * repairs have run. Pushing a dangling function word forward can leave a
+ * one-word caption ("for", "And") and swell the next one past the read limit;
+ * this merges such singletons and re-splits over-long captions, then re-repairs
+ * dangling tails until stable. It only acts on violators, so a clean grouping is
+ * returned unchanged.
+ */
+export function normalizeCaptionLimits(caps, o = {}) {
+  const max = o.maxWords ?? 5;
+  const hardMax = max + 2;
+  let list = caps.map((c) => c.slice());
+
+  for (let iter = 0; iter < 8; iter++) {
+    const startSig = list.map((c) => c.map((t) => t.text).join(" ")).join("\u0000");
+
+    // 1) merge a one-word function caption into the next (or previous if last)
+    const merged = [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      const loneFunc = c.length === 1 && !c[0].emph && FUNC_TAIL.has(norm(c[0].text));
+      if (loneFunc) {
+        if (i < list.length - 1) { list[i + 1] = c.concat(list[i + 1]); continue; }
+        if (merged.length) { merged[merged.length - 1] = merged[merged.length - 1].concat(c); continue; }
+      }
+      merged.push(c);
+    }
+    list = merged;
+
+    // 2) split any caption past the read limit, never ending a chunk on a
+    //    dangling function word (shrink the cut; the remainder continues next)
+    const split = [];
+    for (const c of list) {
+      let rest = c;
+      while (plainCount(rest) > hardMax) {
+        let take = Math.min(max, rest.length);
+        while (take > 1 && !rest[take - 1].emph && !endsSentence(rest[take - 1].text)
+          && FUNC_TAIL.has(norm(rest[take - 1].text))) take--;
+        if (take < 1) take = 1;
+        split.push(rest.slice(0, take));
+        rest = rest.slice(take);
+      }
+      if (rest.length) split.push(rest);
+    }
+    list = split;
+
+    // 3) re-repair dangling tails; stop only when an iteration changes nothing
+    list = repairDanglingTail(list);
+    const endSig = list.map((c) => c.map((t) => t.text).join(" ")).join("\u0000");
+    if (endSig === startSig) break;
+  }
+  return list;
+}
+
 /** transcript words -> caption scenes (tokens per caption). */
 export function groupCaptions(words, o) {
   const opts = { maxWords: 5, maxChars: 30, pauseGap: 0.7, emphasis: [], ...o };
@@ -151,6 +205,7 @@ export function groupCaptions(words, o) {
   let caps = splitCaptions(toks, opts);
   caps = repairDanglingTail(caps);
   caps = repairLeadingOrphan(caps, opts);
+  caps = normalizeCaptionLimits(caps, opts);
   return caps;
 }
 
