@@ -98,13 +98,19 @@ export class DistributionEngine extends BaseEngine {
       }
 
       const asset = this._approvedAsset(item.id);
-      if (!asset) {
+      const hasNonLinkedin = accounts.some((account) => account.platform !== 'linkedin');
+      if (!asset && hasNonLinkedin) {
         this._logSkip('adapt', item.id, 'no approved asset to publish', dryRun);
         result.skipped++;
         continue;
       }
 
       for (const account of accounts) {
+        if (account.platform !== 'linkedin' && !asset) {
+          this._logSkip('adapt', item.id, `${account.platform}:${account.account} needs an approved asset`, dryRun);
+          result.skipped++;
+          continue;
+        }
         const raw = this._copyFor(copy, account.platform, account.account);
         if (!raw) {
           this._logSkip('adapt', item.id, `${account.platform}:${account.account} has no copy`, dryRun);
@@ -267,8 +273,10 @@ export class DistributionEngine extends BaseEngine {
       if (dryRun) {
         const asset = post.asset_id
           ? this._asset(post.asset_id)
-          : this._approvedAsset(post.content_item_id);
-        const publishable = Boolean(asset && asset.status === 'approved');
+          : (post.platform === 'linkedin' ? null : this._approvedAsset(post.content_item_id));
+        const publishable = post.platform === 'linkedin'
+          ? true
+          : Boolean(asset && asset.status === 'approved');
         result.processed++;
         if (!publishable) result.failed++;
         result.posts.push({
@@ -300,13 +308,23 @@ export class DistributionEngine extends BaseEngine {
       // claim returned, so status, asset and publish_state are current.
       const claimed = claim.row;
 
+      if (claimed.platform === 'linkedin') {
+        claimed.assets = this.db.prepare(
+          "SELECT * FROM assets WHERE content_item_id = ? AND status = 'approved' ORDER BY id"
+        ).all(claimed.content_item_id);
+      }
+
       try {
         const item = this._item(claimed.content_item_id);
-        const asset = claimed.asset_id
-          ? this._asset(claimed.asset_id)
-          : this._approvedAsset(claimed.content_item_id);
+        let asset = null;
+        if (claimed.asset_id) {
+          asset = this._asset(claimed.asset_id);
+        } else if (claimed.platform !== 'linkedin') {
+          asset = this._approvedAsset(claimed.content_item_id);
+        }
 
-        if (!asset || asset.status !== 'approved') {
+        const assetRequired = claimed.platform !== 'linkedin' || claimed.asset_id !== null;
+        if (assetRequired && (!asset || asset.status !== 'approved')) {
           const reason = asset ? 'asset is not approved' : 'asset not found';
           this._markFailed(claimed.id, reason);
           result.processed++;
@@ -349,6 +367,7 @@ export class DistributionEngine extends BaseEngine {
               account: claimed.account,
               post: { ...claimed, hashtags: parseJson(claimed.hashtags) ?? [] },
               asset,
+              assets: claimed.assets ?? null,
               item,
               state: publishState ? { ...publishState } : null,
               updateState,
@@ -571,6 +590,7 @@ export class DistributionEngine extends BaseEngine {
   }
 
   _writePost(item, account, copy, asset) {
+    const assetId = asset ? asset.id : null;
     const existing = this._findPost(item.id, account.platform, account.account);
     const published = existing && (existing.status === 'published' || existing.external_id);
     if (published) {
@@ -603,7 +623,7 @@ export class DistributionEngine extends BaseEngine {
         "publish_error = NULL, publish_state = NULL, " +
         "updated_at = datetime('now') WHERE id = ?"
       ).run(
-        account.account, asset.id, copy.title, copy.caption, copy.description,
+         account.account, assetId, copy.title, copy.caption, copy.description,
         JSON.stringify(copy.hashtags), copy.thumbnail_path, existing.id
       );
       return {
@@ -618,7 +638,7 @@ export class DistributionEngine extends BaseEngine {
       "title, caption, description, hashtags, thumbnail_path) " +
       "VALUES (?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)"
     ).run(
-      item.id, asset.id, account.platform, account.account,
+       item.id, assetId, account.platform, account.account,
       copy.title, copy.caption, copy.description,
       JSON.stringify(copy.hashtags), copy.thumbnail_path
     );
@@ -1139,6 +1159,8 @@ export default DistributionEngine;
 export { createPublisherFromSettings } from './publishers/index.mjs';
 export { InstagramPublisher, composeCaption } from './publishers/instagram.mjs';
 export { TikTokPublisher, composeTikTokTitle, planChunks } from './publishers/tiktok.mjs';
+export { LinkedInPublisher } from './publishers/linkedin.mjs';
+export { YouTubePublisher } from './publishers/youtube.mjs';
 export {
   InstagramAuthError,
   InstagramConfigError,
@@ -1156,6 +1178,20 @@ export {
   TikTokRateLimitError,
 } from './publishers/tiktok-errors.mjs';
 export {
+  LinkedInAuthError,
+  LinkedInConfigError,
+  LinkedInError,
+  LinkedInMediaError,
+  LinkedInRateLimitError,
+} from './publishers/linkedin-errors.mjs';
+export {
+  YouTubeAuthError,
+  YouTubeConfigError,
+  YouTubeError,
+  YouTubeMediaError,
+  YouTubeRateLimitError,
+} from './publishers/youtube-errors.mjs';
+export {
   MediaHostError, NginxMediaHost, S3MediaHost, sigV4Presign,
 } from './media-host.mjs';
 export {
@@ -1164,12 +1200,18 @@ export {
   defaultEnvFile,
   instagramAccounts,
   instagramApp,
+  linkedInAccounts,
+  linkedInApp,
+  youTubeAccounts,
+  youTubeApp,
   loadCredentials,
   loadStoredCredentials,
   mediaHostConfig,
   readEnvFile,
   saveCredentials,
   saveInstagramToken,
+  saveLinkedInToken,
+  saveYouTubeToken,
   saveTikTokToken,
   tikTokAccounts,
   tikTokConfig,

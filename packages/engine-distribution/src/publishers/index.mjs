@@ -12,7 +12,13 @@ import {
   loadCredentials,
   mediaHostConfig,
   saveInstagramToken,
+  saveLinkedInToken,
+  saveYouTubeToken,
   saveTikTokToken,
+  linkedInAccounts,
+  linkedInApp,
+  youTubeAccounts,
+  youTubeApp,
   tikTokConfig,
 } from '../credentials.mjs';
 import { NginxMediaHost, S3MediaHost } from '../media-host.mjs';
@@ -20,6 +26,10 @@ import { InstagramConfigError } from './errors.mjs';
 import { InstagramPublisher } from './instagram.mjs';
 import { TikTokConfigError } from './tiktok-errors.mjs';
 import { TikTokPublisher } from './tiktok.mjs';
+import { LinkedInConfigError } from './linkedin-errors.mjs';
+import { LinkedInPublisher } from './linkedin.mjs';
+import { YouTubeConfigError } from './youtube-errors.mjs';
+import { YouTubePublisher } from './youtube.mjs';
 
 /**
  * @param {object} opts
@@ -59,7 +69,11 @@ export function createPublisherFromSettings({
   const app = instagramApp(resolvedCredentials);
   const accounts = instagramAccounts(resolvedCredentials);
   const hostConfig = mediaHostConfig(resolvedCredentials);
-  const tiktok = tikTokConfig(resolvedCredentials);
+   const tiktok = tikTokConfig(resolvedCredentials);
+   const linkedinAppCfg = linkedInApp(resolvedCredentials);
+   const linkedinAccountsCfg = linkedInAccounts(resolvedCredentials);
+   const youtubeAppCfg = youTubeApp(resolvedCredentials);
+   const youtubeAccountsCfg = youTubeAccounts(resolvedCredentials);
 
   const publishers = { ...extraPublishers };
   const missing = new Map();
@@ -68,6 +82,8 @@ export function createPublisherFromSettings({
   const configured = resolveAccounts(resolvedSettings);
   const instagramConfigured = configured.filter((account) => account.platform === 'instagram');
   const tiktokConfigured = configured.filter((account) => account.platform === 'tiktok');
+  const linkedinConfigured = configured.filter((account) => account.platform === 'linkedin');
+  const youtubeConfigured = configured.filter((account) => account.platform === 'youtube');
 
   let sharedHost = mediaHost;
   if (!sharedHost && hostConfig) {
@@ -196,6 +212,80 @@ export function createPublisherFromSettings({
     }
   }
 
+  for (const account of linkedinConfigured) {
+    const key = `linkedin:${account.account}`;
+    const creds = linkedinAccountsCfg[account.account];
+
+    if (!creds) {
+      missing.set(key, `no LinkedIn credentials for account '${account.account}'`);
+      continue;
+    }
+    if (!creds.memberUrn || !creds.accessToken) {
+      missing.set(key, `LinkedIn credentials for '${account.account}' need memberUrn and accessToken`);
+      continue;
+    }
+
+    try {
+      publishers[key] = new LinkedInPublisher({
+        account: account.account,
+        clientId: creds.clientId ?? linkedinAppCfg.clientId,
+        clientSecret: creds.clientSecret ?? linkedinAppCfg.clientSecret,
+        memberUrn: creds.memberUrn,
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken,
+        expiresAt: creds.expiresAt,
+        refreshExpiresAt: creds.refreshExpiresAt,
+        apiVersion: creds.apiVersion ?? linkedinAppCfg.apiVersion,
+        fetchImpl,
+        sleep,
+        clock,
+        logger,
+        onTokenRefresh: async (tokenSet) => {
+          saveLinkedInToken(account.account, tokenSet, { slot: creds.slot, path: explicitPath, envFile: envPath });
+        },
+      });
+    } catch (err) {
+      missing.set(key, err.message);
+    }
+  }
+
+  for (const account of youtubeConfigured) {
+    const key = `youtube:${account.account}`;
+    const creds = youtubeAccountsCfg[account.account];
+
+    if (!creds) {
+      missing.set(key, `no YouTube credentials for account '${account.account}'`);
+      continue;
+    }
+    if (!creds.accessToken) {
+      missing.set(key, `YouTube credentials for '${account.account}' need accessToken`);
+      continue;
+    }
+
+    try {
+      publishers[key] = new YouTubePublisher({
+        account: account.account,
+        clientId: creds.clientId ?? youtubeAppCfg.clientId,
+        clientSecret: creds.clientSecret ?? youtubeAppCfg.clientSecret,
+        channelId: creds.channelId,
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken,
+        expiresAt: creds.expiresAt,
+        refreshExpiresAt: creds.refreshExpiresAt,
+        privacyLevel: creds.privacyLevel ?? 'private',
+        fetchImpl,
+        sleep,
+        clock,
+        logger,
+        onTokenRefresh: async (tokenSet) => {
+          saveYouTubeToken(account.account, tokenSet, { slot: creds.slot, path: explicitPath, envFile: envPath });
+        },
+      });
+    } catch (err) {
+      missing.set(key, err.message);
+    }
+  }
+
   return {
     publishers,
 
@@ -222,9 +312,10 @@ export function createPublisherFromSettings({
 
       if (missing.has(key)) {
         const message = missing.get(key);
-        throw args.platform === 'tiktok'
-          ? new TikTokConfigError(message)
-          : new InstagramConfigError(message);
+        if (args.platform === 'youtube') throw new YouTubeConfigError(message);
+        if (args.platform === 'linkedin') throw new LinkedInConfigError(message);
+        if (args.platform === 'tiktok') throw new TikTokConfigError(message);
+        throw new InstagramConfigError(message);
       }
       if (args.platform === 'instagram' && !instagramConfigured.length) {
         throw new InstagramConfigError(
@@ -234,6 +325,16 @@ export function createPublisherFromSettings({
       if (args.platform === 'tiktok' && !tiktokConfigured.length) {
         throw new TikTokConfigError(
           'no TikTok account is configured; add one to settings.distribution.accounts'
+        );
+      }
+      if (args.platform === 'linkedin' && !linkedinConfigured.length) {
+        throw new LinkedInConfigError(
+          'no LinkedIn account is configured; add one to settings.distribution.accounts'
+        );
+      }
+      if (args.platform === 'youtube' && !youtubeConfigured.length) {
+        throw new YouTubeConfigError(
+          'no YouTube account is configured; add one to settings.distribution.accounts'
         );
       }
 

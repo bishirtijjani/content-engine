@@ -116,6 +116,17 @@ async function route(req, res) {
   const p = url.pathname;
   const method = req.method;
 
+  // --- OAuth callbacks (centralized) ---
+  const oauthHandlers = {
+    '/tiktok/callback': '../scripts/tiktok-auth.mjs',
+    '/linkedin/callback': '../scripts/linkedin-auth.mjs',
+    '/youtube/callback': '../scripts/youtube-auth.mjs',
+  };
+  if (oauthHandlers[p]) {
+    const mod = await import(oauthHandlers[p]);
+    return mod.handleCallbackRequest(req, res);
+  }
+
   // --- health ---
   if (p === '/api/health' && method === 'GET') {
     return json(res, 200, { ok: true, schema_version: 7, db: 'content.db' });

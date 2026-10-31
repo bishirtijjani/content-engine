@@ -365,6 +365,10 @@ export async function handleCallbackRequest(req, res, deps = {}) {
       send(200, 'ok');
       return;
     }
+    if (url.pathname === '/linkedin/callback') {
+      const linkedin = await import('./linkedin-auth.mjs');
+      return linkedin.handleCallbackRequest(req, res, deps);
+    }
     if (url.pathname !== '/tiktok/callback') {
       send(404, 'Not found.');
       return;
@@ -444,55 +448,9 @@ export async function handleCallbackRequest(req, res, deps = {}) {
   }
 }
 
-export function startCallbackServer({ host = DEFAULT_CALLBACK_HOST, port = DEFAULT_CALLBACK_PORT, socketPath = null, logger = console } = {}) {
-  const server = createServer((req, res) => {
-    handleCallbackRequest(req, res).catch((err) => {
-      logger.error?.('TikTok OAuth callback failed');
-      if (!res.headersSent) {
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-store');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.end('TikTok authorization failed.');
-      }
-    });
-  });
-
-  const listen = (callback) => {
-    if (socketPath) {
-      try {
-        unlinkSync(socketPath);
-      } catch (err) {
-        if (err.code !== 'ENOENT') throw err;
-      }
-      mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 });
-      server.listen(socketPath, () => {
-        try {
-          chmodSync(socketPath, 0o660);
-          try { chownSync(socketPath, 101, 101); } catch { /* best effort */ }
-        } catch { /* best effort */ }
-        callback();
-      });
-    } else {
-      server.listen(port, host, callback);
-    }
-  };
-
-  listen(() => {
-    if (socketPath) {
-      logger.log(`TikTok OAuth callback listening on unix:${socketPath}`);
-    } else {
-      logger.log(`TikTok OAuth callback listening on http://${host}:${port}/tiktok/callback`);
-    }
-  });
-
-  server.on('close', () => {
-    if (socketPath) {
-      try { unlinkSync(socketPath); } catch { /* already removed */ }
-    }
-  });
-  return server;
-}
+// Callback serving is centralized in ui/server.mjs. This module only provides
+// handleCallbackRequest for the shared server to invoke.
+export function startCallbackServer() { return null; }
 
 async function main() {
   if (has('--help') || has('-h')) {
@@ -518,15 +476,8 @@ async function main() {
   const apiBase = 'https://open.tiktokapis.com';
 
   if (has('--serve') || has('--callback-server')) {
-    const host = value('--host') || DEFAULT_CALLBACK_HOST;
-    const port = Number(value('--port') || process.env.TIKTOK_CALLBACK_PORT || DEFAULT_CALLBACK_PORT);
-    const socketPath = value('--socket') || null;
-    if (!socketPath && (!Number.isInteger(port) || port < 1 || port > 65535)) {
-      console.error('TikTok callback port must be an integer between 1 and 65535');
-      process.exit(1);
-    }
-    startCallbackServer({ host, port, socketPath });
-    return;
+    console.error('Use the Content OS UI server (ui/server.mjs) for OAuth callbacks.');
+    process.exit(1);
   }
 
   if (!Number.isInteger(slot) || slot < 1) {

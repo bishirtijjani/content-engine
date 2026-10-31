@@ -290,6 +290,183 @@ export function saveTikTokToken(
   return targets;
 }
 
+/** LinkedIn account name -> independently authorized token set. */
+export function linkedInAccounts(credentials = {}) {
+  const linkedin = credentials.linkedin ?? {};
+  const accounts = linkedin.accounts;
+  if (!accounts || typeof accounts !== 'object' || Array.isArray(accounts)) return {};
+
+  return Object.fromEntries(Object.entries(accounts).map(([name, value]) => [
+    String(name).toLowerCase(),
+    {
+      name: String(name).toLowerCase(),
+      slot: value.slot ?? null,
+      clientId: value.clientId ?? linkedin.clientId ?? null,
+      clientSecret: value.clientSecret ?? linkedin.clientSecret ?? null,
+      memberUrn: value.memberUrn ?? value.member_urn ?? null,
+      accessToken: value.accessToken ?? null,
+      refreshToken: value.refreshToken ?? null,
+      expiresAt: value.expiresAt ?? null,
+      refreshExpiresAt: value.refreshExpiresAt ?? null,
+      scope: value.scope ?? null,
+      apiVersion: value.apiVersion ?? linkedin.apiVersion ?? null,
+    },
+  ]));
+}
+
+export function linkedInApp(credentials = {}) {
+  const linkedin = credentials.linkedin ?? {};
+  return {
+    clientId: linkedin.clientId ?? null,
+    clientSecret: linkedin.clientSecret ?? null,
+    redirectUri: linkedin.redirectUri ?? null,
+    apiVersion: linkedin.apiVersion ?? process.env.LINKEDIN_API_VERSION ?? '202610',
+  };
+}
+
+export function saveLinkedInToken(
+  accountName,
+  tokens,
+  { slot = null, path: file = null, envFile = null } = {}
+) {
+  const name = String(accountName).toLowerCase();
+  const targets = [];
+
+  if (envFile) {
+    const values = readEnvFile(envFile);
+    let resolvedSlot = slot;
+    if (resolvedSlot === null) {
+      for (const [key, value] of Object.entries(values)) {
+        const match = key.match(/^LINKEDIN_ACCOUNT_(\d+)_NAME$/);
+        if (match && String(value).toLowerCase() === name) {
+          resolvedSlot = Number(match[1]);
+          break;
+        }
+      }
+    }
+    if (resolvedSlot === null) {
+      throw new Error(
+        `no LinkedIn account slot for '${name}' in ${envFile}; run scripts/linkedin-auth.mjs with --slot`
+      );
+    }
+
+    const updates = {
+      [`LINKEDIN_ACCOUNT_${resolvedSlot}_NAME`]: name,
+      [`LINKEDIN_ACCOUNT_${resolvedSlot}_MEMBER_URN`]: tokens.memberUrn,
+      [`LINKEDIN_ACCOUNT_${resolvedSlot}_ACCESS_TOKEN`]: tokens.accessToken,
+      [`LINKEDIN_ACCOUNT_${resolvedSlot}_EXPIRES_AT`]: tokens.expiresAt,
+    };
+    if (tokens.scope) updates[`LINKEDIN_ACCOUNT_${resolvedSlot}_SCOPE`] = tokens.scope;
+    if (tokens.memberUrn) updates[`LINKEDIN_ACCOUNT_${resolvedSlot}_MEMBER_URN`] = tokens.memberUrn;
+    if (tokens.refreshToken) {
+      updates[`LINKEDIN_ACCOUNT_${resolvedSlot}_REFRESH_TOKEN`] = tokens.refreshToken;
+    }
+    if (tokens.refreshExpiresAt) {
+      updates[`LINKEDIN_ACCOUNT_${resolvedSlot}_REFRESH_EXPIRES_AT`] = tokens.refreshExpiresAt;
+    }
+    targets.push(writeEnvValues(envFile, updates));
+  }
+
+  if (file) {
+    const stored = loadStoredCredentials({ path: file });
+    const linkedin = { ...(stored.linkedin ?? {}) };
+    const accounts = { ...(linkedin.accounts ?? {}) };
+    accounts[name] = {
+      ...(accounts[name] ?? {}),
+      ...tokens,
+      slot: slot ?? accounts[name]?.slot ?? null,
+    };
+    linkedin.accounts = accounts;
+    stored.linkedin = linkedin;
+    targets.push(saveCredentials(stored, { path: file }));
+  }
+
+  return targets;
+}
+
+/** YouTube account name -> independently authorized token set. */
+export function youTubeAccounts(credentials = {}) {
+  const youtube = credentials.youtube ?? {};
+  const accounts = youtube.accounts;
+  if (!accounts || typeof accounts !== 'object' || Array.isArray(accounts)) return {};
+
+  return Object.fromEntries(Object.entries(accounts).map(([name, value]) => [
+    String(name).toLowerCase(),
+    {
+      name: String(name).toLowerCase(),
+      slot: value.slot ?? null,
+      clientId: value.clientId ?? youtube.clientId ?? null,
+      clientSecret: value.clientSecret ?? youtube.clientSecret ?? null,
+      channelId: value.channelId ?? null,
+      accessToken: value.accessToken ?? null,
+      refreshToken: value.refreshToken ?? null,
+      expiresAt: value.expiresAt ?? null,
+      refreshExpiresAt: value.refreshExpiresAt ?? null,
+      scope: value.scope ?? null,
+      privacyLevel: value.privacyLevel ?? youtube.privacyLevel ?? 'private',
+    },
+  ]));
+}
+
+export function youTubeApp(credentials = {}) {
+  const youtube = credentials.youtube ?? {};
+  return {
+    clientId: youtube.clientId ?? null,
+    clientSecret: youtube.clientSecret ?? null,
+    redirectUri: youtube.redirectUri ?? null,
+  };
+}
+
+export function saveYouTubeToken(
+  accountName,
+  tokens,
+  { slot = null, path: file = null, envFile = null } = {}
+) {
+  const name = String(accountName).toLowerCase();
+  const targets = [];
+
+  if (envFile) {
+    const values = readEnvFile(envFile);
+    let resolvedSlot = slot;
+    if (resolvedSlot === null) {
+      for (const [key, value] of Object.entries(values)) {
+        const match = key.match(/^YOUTUBE_ACCOUNT_(\d+)_NAME$/);
+        if (match && String(value).toLowerCase() === name) {
+          resolvedSlot = Number(match[1]);
+          break;
+        }
+      }
+    }
+    if (resolvedSlot === null) {
+      throw new Error(`no YouTube account slot for '${name}' in ${envFile}`);
+    }
+
+    const updates = {
+      [`YOUTUBE_ACCOUNT_${resolvedSlot}_NAME`]: name,
+      [`YOUTUBE_ACCOUNT_${resolvedSlot}_CHANNEL_ID`]: tokens.channelId,
+      [`YOUTUBE_ACCOUNT_${resolvedSlot}_ACCESS_TOKEN`]: tokens.accessToken,
+      [`YOUTUBE_ACCOUNT_${resolvedSlot}_EXPIRES_AT`]: tokens.expiresAt,
+      [`YOUTUBE_ACCOUNT_${resolvedSlot}_SCOPE`]: tokens.scope,
+    };
+    if (tokens.refreshToken) updates[`YOUTUBE_ACCOUNT_${resolvedSlot}_REFRESH_TOKEN`] = tokens.refreshToken;
+    if (tokens.refreshExpiresAt) updates[`YOUTUBE_ACCOUNT_${resolvedSlot}_REFRESH_EXPIRES_AT`] = tokens.refreshExpiresAt;
+    if (tokens.privacyLevel) updates[`YOUTUBE_ACCOUNT_${resolvedSlot}_PRIVACY_LEVEL`] = tokens.privacyLevel;
+    targets.push(writeEnvValues(envFile, updates));
+  }
+
+  if (file) {
+    const stored = loadStoredCredentials({ path: file });
+    const youtube = { ...(stored.youtube ?? {}) };
+    const accounts = { ...(youtube.accounts ?? {}) };
+    accounts[name] = { ...(accounts[name] ?? {}), ...tokens, slot: slot ?? accounts[name]?.slot ?? null };
+    youtube.accounts = accounts;
+    stored.youtube = youtube;
+    targets.push(saveCredentials(stored, { path: file }));
+  }
+
+  return targets;
+}
+
 export function mediaHostConfig(credentials = {}) {
   const host = credentials.mediaHost ?? credentials.media_host ?? null;
   if (!host || typeof host !== 'object') return null;
@@ -379,6 +556,82 @@ function applyEnvironment(stored, env) {
     tiktok.accounts = accounts;
   }
   if (Object.keys(tiktok).length) out.tiktok = tiktok;
+
+  const linkedin = { ...(out.linkedin ?? {}) };
+  if (env.LINKEDIN_CLIENT_ID) linkedin.clientId = env.LINKEDIN_CLIENT_ID;
+  if (env.LINKEDIN_CLIENT_SECRET) linkedin.clientSecret = env.LINKEDIN_CLIENT_SECRET;
+  if (env.LINKEDIN_REDIRECT_URI) linkedin.redirectUri = env.LINKEDIN_REDIRECT_URI;
+  if (env.LINKEDIN_API_VERSION) linkedin.apiVersion = env.LINKEDIN_API_VERSION;
+
+  const linkedinSlots = {};
+  for (const [key, value] of Object.entries(env)) {
+    const match = key.match(/^LINKEDIN_ACCOUNT_(\d+)_(.+)$/);
+    if (!match) continue;
+    const slot = Number(match[1]);
+    linkedinSlots[slot] = linkedinSlots[slot] ?? {};
+    linkedinSlots[slot][match[2].toLowerCase()] = value;
+  }
+  if (Object.keys(linkedinSlots).length) {
+    const accounts = { ...(linkedin.accounts ?? {}) };
+    for (const [slot, fields] of Object.entries(linkedinSlots)) {
+      if (!fields.name) continue;
+      const name = String(fields.name).toLowerCase();
+      accounts[name] = {
+        ...(accounts[name] ?? {}),
+        name,
+        slot: Number(slot),
+        clientId: fields.client_id ?? linkedin.clientId ?? null,
+        clientSecret: fields.client_secret ?? linkedin.clientSecret ?? null,
+        memberUrn: fields.member_urn ?? null,
+        accessToken: fields.access_token ?? null,
+        refreshToken: fields.refresh_token ?? null,
+        expiresAt: fields.expires_at ?? null,
+        refreshExpiresAt: fields.refresh_expires_at ?? null,
+        scope: fields.scope ?? null,
+        apiVersion: fields.api_version ?? linkedin.apiVersion ?? null,
+      };
+    }
+    linkedin.accounts = accounts;
+  }
+  if (Object.keys(linkedin).length) out.linkedin = linkedin;
+
+  const youtube = { ...(out.youtube ?? {}) };
+  if (env.YOUTUBE_CLIENT_ID) youtube.clientId = env.YOUTUBE_CLIENT_ID;
+  if (env.YOUTUBE_CLIENT_SECRET) youtube.clientSecret = env.YOUTUBE_CLIENT_SECRET;
+  if (env.YOUTUBE_REDIRECT_URI) youtube.redirectUri = env.YOUTUBE_REDIRECT_URI;
+  if (env.YOUTUBE_PRIVACY_LEVEL) youtube.privacyLevel = env.YOUTUBE_PRIVACY_LEVEL;
+
+  const youtubeSlots = {};
+  for (const [key, value] of Object.entries(env)) {
+    const match = key.match(/^YOUTUBE_ACCOUNT_(\d+)_(.+)$/);
+    if (!match) continue;
+    const slot = Number(match[1]);
+    youtubeSlots[slot] = youtubeSlots[slot] ?? {};
+    youtubeSlots[slot][match[2].toLowerCase()] = value;
+  }
+  if (Object.keys(youtubeSlots).length) {
+    const accounts = { ...(youtube.accounts ?? {}) };
+    for (const [slot, fields] of Object.entries(youtubeSlots)) {
+      if (!fields.name) continue;
+      const name = String(fields.name).toLowerCase();
+      accounts[name] = {
+        ...(accounts[name] ?? {}),
+        name,
+        slot: Number(slot),
+        clientId: fields.client_id ?? youtube.clientId ?? null,
+        clientSecret: fields.client_secret ?? youtube.clientSecret ?? null,
+        channelId: fields.channel_id ?? null,
+        accessToken: fields.access_token ?? null,
+        refreshToken: fields.refresh_token ?? null,
+        expiresAt: fields.expires_at ?? null,
+        refreshExpiresAt: fields.refresh_expires_at ?? null,
+        scope: fields.scope ?? null,
+        privacyLevel: fields.privacy_level ?? youtube.privacyLevel ?? 'private',
+      };
+    }
+    youtube.accounts = accounts;
+  }
+  if (Object.keys(youtube).length) out.youtube = youtube;
 
   const host = { ...(out.mediaHost ?? {}) };
   if (env.MEDIA_HOST_PROVIDER) host.provider = env.MEDIA_HOST_PROVIDER;

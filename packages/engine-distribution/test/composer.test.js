@@ -90,6 +90,6 @@ test('composer: an unknown platform has a clear error', async () => {
 
   await assert.rejects(
     publisher.publish({ platform: 'youtube', account: 'main', post: {}, asset: {}, item: {} }),
-    /no publisher configured for youtube:main/
+    /no YouTube account is configured/
   );
 });
