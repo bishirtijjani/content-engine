@@ -308,7 +308,7 @@ export class DistributionEngine extends BaseEngine {
       // claim returned, so status, asset and publish_state are current.
       const claimed = claim.row;
 
-      if (claimed.platform === 'linkedin') {
+      if (claimed.platform === 'linkedin' || claimed.platform === 'instagram') {
         claimed.assets = this.db.prepare(
           "SELECT * FROM assets WHERE content_item_id = ? AND status = 'approved' ORDER BY id"
         ).all(claimed.content_item_id);
@@ -365,7 +365,7 @@ export class DistributionEngine extends BaseEngine {
             const out = await this.publisher.publish({
               platform: claimed.platform,
               account: claimed.account,
-              post: { ...claimed, hashtags: parseJson(claimed.hashtags) ?? [] },
+               post: { ...claimed, hashtags: parseJson(claimed.hashtags) ?? [], platform_metadata: parseJson(claimed.platform_metadata) },
               asset,
               assets: claimed.assets ?? null,
               item,
@@ -619,12 +619,16 @@ export class DistributionEngine extends BaseEngine {
     if (existing) {
       this.db.prepare(
         "UPDATE posts SET account = ?, asset_id = ?, title = ?, caption = ?, " +
-        "description = ?, hashtags = ?, thumbnail_path = ?, status = 'scheduled', " +
+        "description = ?, hashtags = ?, thumbnail_path = ?, platform_metadata = ?, " +
+        "scheduled_at = COALESCE(?, scheduled_at), status = 'scheduled', " +
         "publish_error = NULL, publish_state = NULL, " +
         "updated_at = datetime('now') WHERE id = ?"
       ).run(
-         account.account, assetId, copy.title, copy.caption, copy.description,
-        JSON.stringify(copy.hashtags), copy.thumbnail_path, existing.id
+        account.account, assetId, copy.title, copy.caption, copy.description,
+        JSON.stringify(copy.hashtags), copy.thumbnail_path,
+        copy.platform_metadata ? JSON.stringify(copy.platform_metadata) : null,
+        copy.scheduled_at || null,
+        existing.id
       );
       return {
         preserved: false,
@@ -635,12 +639,14 @@ export class DistributionEngine extends BaseEngine {
 
     const res = this.db.prepare(
       "INSERT INTO posts (content_item_id, asset_id, platform, account, status, " +
-      "title, caption, description, hashtags, thumbnail_path) " +
-      "VALUES (?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?)"
+      "title, caption, description, hashtags, thumbnail_path, platform_metadata, scheduled_at) " +
+      "VALUES (?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?, ?, ?)"
     ).run(
-       item.id, assetId, account.platform, account.account,
+      item.id, assetId, account.platform, account.account,
       copy.title, copy.caption, copy.description,
-      JSON.stringify(copy.hashtags), copy.thumbnail_path
+      JSON.stringify(copy.hashtags), copy.thumbnail_path,
+      copy.platform_metadata ? JSON.stringify(copy.platform_metadata) : null,
+      copy.scheduled_at || null
     );
     return {
       preserved: false,

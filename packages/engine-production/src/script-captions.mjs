@@ -19,32 +19,6 @@
 
 const norm = (t) => String(t).replace(/[^\w']/g, "").toLowerCase();
 
-/** Levenshtein distance, capped — used only to spot a mis-heard word. */
-function editDistance(a, b, cap = 3) {
-  if (a === b) return 0;
-  if (Math.abs(a.length - b.length) > cap) return cap + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let best = i;
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
-      if (cur[j] < best) best = cur[j];
-    }
-    if (best > cap) return cap + 1;
-    prev = cur;
-  }
-  return prev[b.length];
-}
-
-/** True when two words are close enough to be the same word mis-heard. */
-function similar(a, b) {
-  if (a === b) return true;
-  if (Math.min(a.length, b.length) < 3) return false;
-  return editDistance(a, b) <= 2;
-}
-
 /**
  * @param {string} scriptText - the finalized script (lines, with punctuation)
  * @param {Array<{text:string,start:number,end:number}>} asrWords
@@ -91,12 +65,37 @@ export function buildScriptWords(scriptText, asrWords, { maxCells = 4000000 } = 
   }
   anchors.push({ i: n, j: m });
 
-  // asr index -> script token index. Exact anchors first, then pair the
-  // leftover words sitting between the same two anchors (mis-hears).
-  const takeScript = new Map();
-  for (const an of anchors) {
-    if (an.j >= 0 && an.j < m) takeScript.set(an.j, an.i);
-  }
+  // Walk the anchored regions. Between two anchors the SCRIPT is the source of
+  // truth: emit its words so a badly mis-heard word ("10 credit cards" for
+  // "take records") can never survive in the captions. When the gap counts
+  // match, each script word takes the spoken word's timing; otherwise the
+  // script words are laid evenly across the spoken span. Words the speaker
+  // added where the script has nothing (a real aside) are kept as spoken.
+  const out = [];
+  const emitGap = (scriptGap, asrGap, prev, next) => {
+    if (!scriptGap.length) {
+      for (const t of asrGap) {
+        out.push({ text: asrWords[t].text, start: asrWords[t].start, end: asrWords[t].end, spoken: true });
+      }
+      return;
+    }
+    if (asrGap.length === scriptGap.length) {
+      scriptGap.forEach((s, idx) => {
+        out.push({ text: scriptTokens[s], start: asrWords[asrGap[idx]].start, end: asrWords[asrGap[idx]].end });
+      });
+      return;
+    }
+    const t0 = asrGap.length ? asrWords[asrGap[0]].start : (prev.j >= 0 ? asrWords[prev.j].end : 0);
+    const t1 = asrGap.length
+      ? asrWords[asrGap[asrGap.length - 1]].end
+      : (next.j < m ? asrWords[next.j].start : t0 + 0.3 * scriptGap.length);
+    const span = Math.max(0.1, t1 - t0);
+    const each = span / scriptGap.length;
+    scriptGap.forEach((s, idx) => {
+      out.push({ text: scriptTokens[s], start: t0 + idx * each, end: t0 + (idx + 1) * each });
+    });
+  };
+
   for (let k = 1; k < anchors.length; k++) {
     const prev = anchors[k - 1];
     const next = anchors[k];
@@ -104,21 +103,10 @@ export function buildScriptWords(scriptText, asrWords, { maxCells = 4000000 } = 
     for (let s = prev.i + 1; s < next.i; s++) scriptGap.push(s);
     const asrGap = [];
     for (let t = prev.j + 1; t < next.j; t++) asrGap.push(t);
-    const pairs = Math.min(scriptGap.length, asrGap.length);
-    for (let p = 0; p < pairs; p++) {
-      // Only pair words that are plausibly the same word mis-heard; otherwise the
-      // speaker went off-script and we keep what they actually said.
-      if (similar(a[scriptGap[p]], b[asrGap[p]])) takeScript.set(asrGap[p], scriptGap[p]);
-    }
-  }
-
-  const out = [];
-  for (let k = 0; k < m; k++) {
-    const w = asrWords[k];
-    if (takeScript.has(k)) {
-      out.push({ text: scriptTokens[takeScript.get(k)], start: w.start, end: w.end });
-    } else {
-      out.push({ text: w.text, start: w.start, end: w.end, spoken: true });
+    emitGap(scriptGap, asrGap, prev, next);
+    // the exact-match anchor word itself keeps its spoken timing
+    if (next.j >= 0 && next.j < m && next.i >= 0 && next.i < n) {
+      out.push({ text: scriptTokens[next.i], start: asrWords[next.j].start, end: asrWords[next.j].end });
     }
   }
 

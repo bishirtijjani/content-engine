@@ -32,7 +32,7 @@
 //   resubmit               ask again after the human rejected it
 //   schedule               move forward after the human approved
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import {
   BaseEngine,
@@ -310,6 +310,7 @@ export class ProductionEngine extends BaseEngine {
       height: dims.height,
       duration,
       style,
+      emphasis: this._scriptEmphasis(item),
       orientation,
       fit,
       fps: dims.fps,
@@ -509,6 +510,7 @@ export class ProductionEngine extends BaseEngine {
       this.log('preview', { targetType: 'content_item', targetId: item.id, status: 'error', message: `render failed: ${render.error}` });
       return { processed: 0, skipped: 1 };
     }
+    this._normalizeLoudness(outputPath, style);
 
     this.log('preview', { targetType: 'content_item', targetId: item.id, message: `rendered a ${dims.width}x${dims.height} preview to ${outputPath}` });
     return { processed: 1, skipped: 0, path: outputPath };
@@ -625,6 +627,7 @@ export class ProductionEngine extends BaseEngine {
         message: `sfx mix failed, keeping the plain picture: ${mix.error}`,
       });
     }
+    this._normalizeLoudness(finalPath, style);
 
     this.db.prepare(
       'INSERT INTO assets (content_item_id, platform, file_path, status, duration_seconds, width, height, orientation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -1080,6 +1083,49 @@ export class ProductionEngine extends BaseEngine {
       return raw;
     }
     return null;
+  }
+
+  /**
+   * The agent-chosen emphasis phrases for this item's captions, from
+   * `script.emphasis` (an array of exact spoken phrases). Returns null when the
+   * agent set none, so the caption builder falls back to the locked style list.
+   */
+  _scriptEmphasis(item) {
+    const raw = item?.script;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed?.emphasis)
+        ? parsed.emphasis.filter((p) => typeof p === 'string' && p.trim())
+        : [];
+      return list.length ? list : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Bring a rendered file's voice to the locked loudness target. HyperFrames
+   * renders the audio element well below the source level, so every preview and
+   * final is normalized after the picture is encoded (video stream copied, audio
+   * re-encoded). Skips when style.audio.normalize is false.
+   */
+  _normalizeLoudness(filePath, style = null) {
+    const cfg = (style ?? loadStyle()).audio ?? {};
+    if (cfg.normalize === false) return { ok: true, skipped: true };
+    const I = cfg.loudnessI ?? -14;
+    const TP = cfg.truePeak ?? -1.5;
+    const LRA = cfg.lra ?? 11;
+    const tmp = `${filePath}.norm.mp4`;
+    const res = spawnSync('ffmpeg', [
+      '-y', '-v', 'error', '-i', filePath,
+      '-map', '0', '-c:v', 'copy',
+      '-af', `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}`,
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', tmp,
+    ], { encoding: 'utf8' });
+    if (res.status !== 0) return { ok: false, error: (res.stderr || '').slice(-300) };
+    renameSync(tmp, filePath);
+    return { ok: true };
   }
 
   /** Render a HyperFrames composition to MP4 at the locked output quality. */

@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS posts (
   description     TEXT,
   hashtags        TEXT,                   -- JSON array
   thumbnail_path  TEXT,
+  platform_metadata TEXT,                 -- JSON: platform-specific metadata (YouTube SEO etc.)
   scheduled_at    TEXT,                   -- ISO 8601 (UTC)
   published_at    TEXT,
   external_id     TEXT,                   -- platform post id after publishing

@@ -84,7 +84,7 @@ export class YouTubePublisher {
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json; charset=UTF-8',
-          'X-Upload-Content-Type': 'video/*',
+          'X-Upload-Content-Type': 'video/mp4',
           'X-Upload-Content-Length': String(stat.size),
         },
         body: JSON.stringify(metadata),
@@ -104,7 +104,7 @@ export class YouTubePublisher {
       const putRes = await this.fetchImpl(uploadUrl, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'video/*',
+          'Content-Type': 'video/mp4',
           'Content-Length': String(stat.size),
         },
         body: await (await import('node:fs')).readFileSync(absolute),
@@ -116,6 +116,7 @@ export class YouTubePublisher {
       }
       const body = await putRes.json().catch(() => null);
       videoId = body?.id ?? videoId;
+      this.logger?.info?.(`YouTube upload completed: videoId=${videoId} status=${putRes.status}`);
       this._updateState({ stage: 'processing', uploadUrl, uploaded: true, uploadedBytes: stat.size, videoId });
     }
 
@@ -143,22 +144,27 @@ export class YouTubePublisher {
   }
 
   _metadata(post, item) {
-    const tags = Array.isArray(post?.hashtags) ? post.hashtags.map((t) => String(t).replace(/^#/, '')) : [];
-    const scheduledAt = post?.scheduled_at ? new Date(post.scheduled_at) : null;
+    const pm = post?.platform_metadata || {};
+    const minimal = pm.minimalMetadata === true;
+    const scheduleRequested = pm.schedule === true;
+    const scheduledAt = (scheduleRequested && post?.scheduled_at) ? new Date(post.scheduled_at) : null;
     const isScheduled = scheduledAt && scheduledAt.getTime() > this.clock().getTime();
-    const privacy = isScheduled ? 'private' : (this.privacyLevel || 'private');
+    const privacy = isScheduled ? 'private' : (pm.privacyLevel || this.privacyLevel || 'private');
     const status = { privacyStatus: privacy };
     if (isScheduled) status.publishAt = scheduledAt.toISOString();
+    const tags = minimal ? [] : (Array.isArray(post?.hashtags) ? post.hashtags.map((t) => String(t).replace(/^#/, '')) : []);
     const snippet = {
       title: post?.title || item?.title || 'Untitled',
       description: [post?.caption, post?.description].filter(Boolean).join('\n\n'),
       tags,
-      categoryId: post?.categoryId || this.categoryId || '22',
+      categoryId: minimal ? '22' : (pm.categoryId || post?.categoryId || this.categoryId || '22'),
     };
-    const lang = post?.defaultLanguage || this.defaultLanguage;
-    if (lang) {
-      snippet.defaultLanguage = lang;
-      snippet.defaultAudioLanguage = lang;
+    if (!minimal) {
+      const lang = pm.defaultLanguage || post?.defaultLanguage || this.defaultLanguage;
+      if (lang) {
+        snippet.defaultLanguage = lang;
+        snippet.defaultAudioLanguage = lang;
+      }
     }
     return { snippet, status };
   }
@@ -187,8 +193,15 @@ export class YouTubePublisher {
   async _uploadThumbnail(videoId, filePath) {
     const absolute = path.resolve(filePath);
     if (!existsSync(absolute)) return;
-    const buf = (await import('node:fs')).readFileSync(absolute);
     const ext = path.extname(absolute).toLowerCase();
+    if (!['.png', '.jpg', '.jpeg'].includes(ext)) {
+      throw new YouTubeMediaError('YouTube thumbnail must be PNG or JPEG', { code: 'THUMBNAIL_FORMAT' });
+    }
+    const stat = (await import('node:fs')).statSync(absolute);
+    if (stat.size > 2 * 1024 * 1024) {
+      throw new YouTubeMediaError('YouTube thumbnail must be under 2 MB', { code: 'THUMBNAIL_SIZE' });
+    }
+    const buf = (await import('node:fs')).readFileSync(absolute);
     const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
     const res = await this.fetchImpl(`${UPLOAD_URL}/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`, {
       method: 'POST',

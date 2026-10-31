@@ -15,7 +15,7 @@
 // HARD GATE: if any scene breaks a clause, dangles a function word, or over-emphasizes,
 // this throws and nothing renders.
 import fs from "node:fs";
-import { groupCaptions, validateCaptions } from "../tools/lib/captions.mjs";
+import { groupCaptions, validateCaptions, keepFirstEmphasis, normalizeCaptionLimits } from "../tools/lib/captions.mjs";
 import { loadStyle } from "./style.mjs";
 
 const MUSIC = /^[♪♫♬♩♧\s]+$/;
@@ -49,6 +49,28 @@ export function loadTranscript(words, lexiconPath) {
 }
 
 /**
+ * Warn (in the render log) when an agent-chosen emphasis phrase is never spoken,
+ * so a typo or a stale phrase cannot silently drop the emphasis.
+ */
+function warnMissingEmphasis(phrases, words) {
+  if (!Array.isArray(phrases) || !phrases.length) return;
+  const wtoks = words.map((w) => String(w.text).toLowerCase().replace(/[^a-z0-9]/g, ""));
+  for (const phrase of phrases) {
+    const ptoks = String(phrase).toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+    if (!ptoks.length) continue;
+    let found = false;
+    for (let i = 0; i < wtoks.length && !found; i++) {
+      let ok = true;
+      for (let k = 0; k < ptoks.length; k++) {
+        if (wtoks[i + k] !== ptoks[k]) { ok = false; break; }
+      }
+      if (ok) found = true;
+    }
+    if (!found) console.warn(`[captions] emphasis phrase not found in narration: "${phrase}"`);
+  }
+}
+
+/**
  * Transcript words -> caption scenes (with timing), plus the accent colors.
  * Throws if any caption breaks a rule.
  *
@@ -79,14 +101,20 @@ export function computeCaptionScenes({
   const words = loadTranscript(rawWords, lexiconPath);
   const duration = Number(explicitDuration) || (words.length ? words[words.length - 1].end + 0.4 : 1);
 
+  const emphasisList = emphasis ?? capCfg.emphasis ?? [];
   const gOpts = {
-    emphasis: emphasis ?? capCfg.emphasis ?? [],
+    emphasis: emphasisList,
     maxWords: g.maxWords,
     maxChars: g.maxChars,
     pauseGap: g.pauseGap,
     maxEmphasisPerPhrase: capCfg.maxEmphasisPerPhrase ?? 1,
   };
-  const caps = groupCaptions(words, gOpts);
+  let caps = groupCaptions(words, gOpts);
+  keepFirstEmphasis(caps);
+  // Demoting a second emphasis can push a caption back over the read limit; re-split.
+  caps = normalizeCaptionLimits(caps, gOpts);
+  keepFirstEmphasis(caps);
+  if (Array.isArray(emphasis)) warnMissingEmphasis(emphasisList, words);
   const problems = validateCaptions(caps, gOpts);
   if (problems.length) {
     throw new Error(

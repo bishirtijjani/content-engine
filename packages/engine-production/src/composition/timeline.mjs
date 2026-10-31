@@ -49,6 +49,7 @@ export function buildSnapshotComposition({
   duration,
   style = null,
   lexiconPath = LEXICON_PATH,
+  emphasis = null,
   orientation = 'portrait',
   fit = 'cover',
   fps = 24,
@@ -73,7 +74,7 @@ export function buildSnapshotComposition({
 
   // Captions (the visual layer that rides the voice, independent of segments).
   const layer = buildCaptionLayer({
-    words, width, style: s, lexiconPath, emphasis: s.captions?.emphasis, duration: dur, orientation,
+    words, width, style: s, lexiconPath, emphasis: emphasis ?? s.captions?.emphasis, duration: dur, orientation,
   });
 
   const sceneHtml = [];

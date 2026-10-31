@@ -36,6 +36,47 @@ test('YouTube publish init+upload+process', async () => {
   fs.unlinkSync('/tmp/yt.mp4');
 });
 
+test('YouTube upload not retrievable stops publish', async () => {
+  const fs = await import('node:fs');
+  fs.writeFileSync('/tmp/yt3.mp4', Buffer.alloc(10));
+  const asset = { file_path: '/tmp/yt3.mp4' };
+  const fetchImpl = async (url, opts) => {
+    if (url.includes('uploadType=resumable')) return res(true, 200, {}, { location: 'https://upload/yt3' });
+    if (url === 'https://upload/yt3') return res(true, 200, { id: 'ghost123' });
+    if (url.includes('/videos?part=status')) return res(true, 200, { items: [] });
+    return res(true, 200, {});
+  };
+  let ticks = 0;
+  const clock = () => new Date(ticks++ === 0 ? '2026-01-01T00:00:00Z' : '2026-01-01T00:10:00Z');
+  const pub = new YouTubePublisher({ accessToken: 't', fetchImpl, clock, sleep: async () => {} });
+  await assert.rejects(() => pub.publish({ post: { title: 'T', caption: 'desc' }, asset, item: { id: 1 } }), /did not finish processing/i);
+  fs.unlinkSync('/tmp/yt3.mp4');
+});
+
+test('YouTube polls until video becomes available', async () => {
+  const fs = await import('node:fs');
+  fs.writeFileSync('/tmp/yt4.mp4', Buffer.alloc(10));
+  const asset = { file_path: '/tmp/yt4.mp4' };
+  let calls = 0;
+  const fetchImpl = async (url, opts) => {
+    if (url.includes('uploadType=resumable')) return res(true, 200, {}, { location: 'https://upload/yt4' });
+    if (url === 'https://upload/yt4') return res(true, 200, { id: 'vid4' });
+    if (url.includes('/videos?part=status')) {
+      calls++;
+      if (calls <= 3) return res(true, 200, { items: [] });
+      return res(true, 200, { items: [{ status: { uploadStatus: 'processed' } }] });
+    }
+    return res(true, 200, {});
+  };
+  let ticks = 0;
+  const clock = () => new Date(Date.parse('2026-01-01T00:00:00Z') + (ticks++ * 1000));
+  const pub = new YouTubePublisher({ accessToken: 't', fetchImpl, clock, sleep: async () => {} });
+  const out = await pub.publish({ post: { title: 'T', caption: 'desc' }, asset, item: { id: 1 } });
+  assert.equal(out.externalId, 'vid4');
+  assert.ok(calls >= 4);
+  fs.unlinkSync('/tmp/yt4.mp4');
+});
+
 test('YouTube processing failure stops publish', async () => {
   const fs = await import('node:fs');
   fs.writeFileSync('/tmp/yt2.mp4', Buffer.alloc(10));

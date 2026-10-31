@@ -16,7 +16,7 @@ export const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 export const DEFAULT_DB_PATH = path.join(PROJECT_ROOT, 'data', 'content.db');
 const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 const INDEXES_FILE = path.join(__dirname, 'indexes.sql');
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 // ---------------------------------------------------------------------------
 // Migrations — run after the schema file (which creates new tables with
@@ -81,6 +81,12 @@ const MIGRATIONS = [
       // once. An expired lease is reclaimable after a crash.
       addColumn(db, 'posts', 'publish_claim_id', 'TEXT');
       addColumn(db, 'posts', 'publish_claim_expires_at', 'TEXT');
+    },
+  },
+  {
+    version: 8,
+    up(db) {
+      addColumn(db, 'posts', 'platform_metadata', 'TEXT');
     },
   },
 ];

@@ -213,6 +213,14 @@
     "note": "Used by both the cleaner's cut and the render, so the final size is predictable. crf 18 is visually lossless; preset veryfast is the speed choice for this machine. The picture is encoded at most twice: once by the cleaner, once by the render."
   },
 
+  "audio": {
+    "normalize": true,
+    "loudnessI": -14,
+    "truePeak": -1.5,
+    "lra": 11,
+    "note": "Loudness target applied to every render (preview and final) after the picture is encoded. loudnessI is the integrated target in LUFS; truePeak is the ceiling in dBTP. HyperFrames renders the voice low, so this brings it to a social-standard level. Set normalize:false to skip."
+  },
+
   "render": {
     "note": "The engine owns how HyperFrames renders, so it never guesses. workers and fps are passed explicitly; this overrides HyperFrames' low-memory pin and its auto worker sizing. On an 8 GB machine, floor(RAM*0.5/1536MB) = 2 workers is the safe ceiling; more spills to the page file and slows the render. lowMemoryMode:false keeps hardware GPU capture (low-memory mode would force software). timeoutMs is the spawnSync budget. preview is the fast, low-res canvas the agent iterates on (no asset, no gate); final is the locked, full-res render. --experimental-fast-capture is NOT used: drawElement self-verification fails on this composition.",
     "workers": 2,

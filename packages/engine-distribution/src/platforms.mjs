@@ -114,6 +114,16 @@ export function validateCopy(platform, copy) {
     return fail('thumbnail_path must be a string');
   }
 
+  const platformMetadata = copy.platform_metadata;
+  if (platformMetadata !== undefined && platformMetadata !== null && (typeof platformMetadata !== 'object' || Array.isArray(platformMetadata))) {
+    return fail('platform_metadata must be an object');
+  }
+
+  const scheduledAt = copy.scheduled_at;
+  if (scheduledAt !== undefined && scheduledAt !== null && typeof scheduledAt !== 'string') {
+    return fail('scheduled_at must be a string');
+  }
+
   return {
     ok: true,
     value: {
@@ -122,6 +132,8 @@ export function validateCopy(platform, copy) {
       description: description ?? null,
       hashtags: hashtags.map((tag) => tag.trim()),
       thumbnail_path: thumbnail ?? null,
+      platform_metadata: platformMetadata ?? null,
+      scheduled_at: scheduledAt ?? null,
     },
   };
 }

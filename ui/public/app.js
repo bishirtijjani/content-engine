@@ -99,7 +99,7 @@ function fmtDate(d) {
 }
 function badge(text, cls = '') { return `<span class="badge ${cls}">${esc(text)}</span>`; }
 function statusBadge(s) {
-  const map = { idea: '', evaluated: 'info', planned: 'info', researched: 'info', scripted: 'warn', ready_to_shoot: 'warn', shot: 'warn', editing: 'accent', scheduled: 'accent', published: 'success', measured: 'success', archived: '', failed: 'danger' };
+  const map = { idea: '', evaluated: 'info', planned: 'info', researched: 'info', scripted: 'warn', ready_to_shoot: 'warn', shot: 'warn', editing: 'accent', scheduled: 'accent', draft: 'warn', published: 'success', measured: 'success', archived: '', failed: 'danger' };
   return badge(s, map[s] || '');
 }
 
@@ -174,7 +174,12 @@ async function render(force = false) {
   const c = document.getElementById('content');
   c.innerHTML = loading();
   try {
-    await views[currentView](c, force);
+    const view = views[currentView];
+    if (typeof view !== 'function') {
+      c.innerHTML = empty('View not available', `The "${currentView}" view is not implemented yet.`);
+      return;
+    }
+    await view(c, force);
   } catch (e) {
     c.innerHTML = `<div class="card"><strong>Error:</strong> ${esc(e.message)}</div>`;
   }
@@ -1595,6 +1600,397 @@ views.approvals = async (c) => {
   ` : '';
 
   c.innerHTML = sections + historyHtml;
+};
+
+// DISTRIBUTION
+function parseDistributionState(post) {
+  try { return post.publish_state ? JSON.parse(post.publish_state) : null; } catch { return null; }
+}
+
+views.distribution = async (c) => {
+  const [{ items }, { posts }, { assets }, { settings }] = await Promise.all([
+    api('/api/content-items'), api('/api/posts'), api('/api/assets'), api('/api/settings'),
+  ]);
+  const postsById = {};
+  for (const post of posts) postsById[post.id] = post;
+  const itemsById = {};
+  for (const item of items) itemsById[item.id] = item;
+  window._distribution = { postsById, itemsById };
+
+  const distributionSetting = settings.find((setting) => setting.key === 'distribution');
+  let distribution = {};
+  try { distribution = distributionSetting ? JSON.parse(distributionSetting.value) : {}; } catch { distribution = {}; }
+  const accounts = Array.isArray(distribution.accounts) ? distribution.accounts : [];
+
+  const counts = { scheduled: 0, draft: 0, failed: 0, published: 0 };
+  for (const post of posts) if (counts[post.status] !== undefined) counts[post.status]++;
+
+  const withPosts = new Set(posts.map((post) => post.content_item_id));
+  const active = items.filter((item) =>
+    item.status === 'scheduled' || item.status === 'published' || withPosts.has(item.id)
+  );
+  const assetsByItem = {};
+  for (const asset of assets) {
+    (assetsByItem[asset.content_item_id] = assetsByItem[asset.content_item_id] || []).push(asset);
+  }
+
+  const postCard = (post) => {
+    const state = parseDistributionState(post);
+    const hashtags = Array.isArray(post.hashtags) ? post.hashtags : [];
+    const when = post.published_at || post.scheduled_at;
+    const canEdit = (post.status === 'scheduled' || post.status === 'failed') && !state;
+    const canPublish = !post.external_id && (post.status === 'scheduled' || post.status === 'failed');
+    const canReset = post.status === 'failed' && state;
+    const actions = [
+      canEdit ? `<button class="btn sm" onclick="distEditCopy(${post.id})">${icon('edit',12)} Edit copy</button>` : '',
+      canPublish ? `<button class="btn sm primary" onclick="distPublishPost(${post.id})">Publish</button>` : '',
+      canReset ? `<button class="btn sm danger" onclick="distResetState(${post.id})">Reset state</button>` : '',
+      post.url ? `<a class="btn sm" href="${esc(post.url)}" target="_blank" rel="noopener">Open post</a>` : '',
+    ].filter(Boolean).join(' ');
+    const stateBits = [];
+    if (state?.stage) stateBits.push(`stage ${state.stage}`);
+    if (state?.publishId) stateBits.push(`publish ${state.publishId}`);
+    if (state?.uploadedBytes != null && state?.videoSize != null) stateBits.push(`${state.uploadedBytes}/${state.videoSize} bytes`);
+    return `
+      <div class="card-flat" style="margin-bottom:10px;">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div class="row" style="gap:6px;flex-wrap:wrap;">
+              <strong>${esc(post.platform)}:${esc(post.account)}</strong>
+              ${statusBadge(post.status)}
+              ${post.status === 'draft' ? badge('manual completion', 'warn') : ''}
+            </div>
+            <div class="meta" style="margin-top:3px;">post #${post.id} · ${esc(when ? fmtDate(when) : 'not scheduled')}${post.external_id ? ` · external ${esc(post.external_id)}` : ''}</div>
+          </div>
+          <div class="row" style="gap:6px;flex-wrap:wrap;">${actions || '<span class="meta">—</span>'}</div>
+        </div>
+        ${post.title ? `<div style="margin-top:10px;"><div class="label">Title</div><div>${esc(post.title)}</div></div>` : ''}
+        ${post.caption ? `<div style="margin-top:8px;"><div class="label">Caption</div><div style="white-space:pre-wrap;">${esc(post.caption)}</div></div>` : '<div class="meta" style="margin-top:8px;">No caption</div>'}
+        ${post.description ? `<div style="margin-top:8px;"><div class="label">Description</div><div style="white-space:pre-wrap;">${esc(post.description)}</div></div>` : ''}
+        <div style="margin-top:8px;"><div class="label">Hashtags</div><div class="row" style="gap:4px;flex-wrap:wrap;">${hashtags.length ? hashtags.map((tag) => badge(tag)).join('') : '<span class="meta">none</span>'}</div></div>
+        ${post.thumbnail_path ? `<div class="meta" style="margin-top:6px;">thumbnail: ${esc(post.thumbnail_path)}</div>` : ''}
+        ${stateBits.length ? `<div class="meta" style="margin-top:6px;">${esc(stateBits.join(' · '))}</div>` : ''}
+        ${post.publish_error ? `<div style="margin-top:8px;padding:8px;border-left:3px solid var(--error);background:var(--surface-inset);"><div class="label">Last error</div><div class="meta" style="word-break:break-word;">${esc(post.publish_error)}</div></div>` : ''}
+      </div>
+    `;
+  };
+
+  const cards = active.map((item) => {
+    const itemPosts = posts.filter((post) => post.content_item_id === item.id);
+    const itemAssets = assetsByItem[item.id] || [];
+    const asset = itemAssets.slice().sort((a, b) => b.id - a.id)[0];
+    const assetUrl = asset ? mediaUrl(asset.file_path) : null;
+    return `
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div class="row" style="gap:6px;flex-wrap:wrap;"><strong>${esc(item.title)}</strong>${statusBadge(item.status)}</div>
+            <div class="meta" style="margin-top:3px;">item ${item.id} · ${esc(item.pillar || '—')} · ${esc(item.format || '—')} · ${item.desired_length_seconds ? item.desired_length_seconds + 's' : '—'}</div>
+          </div>
+          <div class="row" style="gap:6px;flex-wrap:wrap;">
+            <button class="btn sm" onclick="openItem(${item.id})">Open item</button>
+            <button class="btn sm" onclick="adaptCopy(${item.id})">${icon('plus',12)} Add copy</button>
+          </div>
+        </div>
+        <div class="row" style="align-items:flex-start;gap:14px;margin-top:12px;flex-wrap:wrap;">
+          <div style="flex:0 0 190px;max-width:100%;">
+            ${assetUrl ? `<video src="${esc(assetUrl)}" controls preload="metadata" style="width:190px;max-width:100%;border-radius:8px;border:1px solid var(--border);background:#000;"></video>` : '<div class="card-flat"><div class="meta">No approved asset</div></div>'}
+            ${asset ? `<div class="meta" style="margin-top:4px;">asset ${asset.id} · ${esc(asset.status)} · ${asset.width || '?'}×${asset.height || '?'}</div>` : ''}
+          </div>
+          <div style="flex:1;min-width:260px;">
+            ${itemPosts.length ? itemPosts.map(postCard).join('') : `
+              <div class="card-flat">
+                <div class="meta">No platform posts yet. Add copy for an account to create the post record.</div>
+                <button class="btn sm primary" style="margin-top:8px;" onclick="adaptCopy(${item.id})">Add platform copy</button>
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('') || empty('No distribution items', 'Items appear here after production schedules them.');
+
+  c.innerHTML = `
+    <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap;">
+      <button class="btn sm" onclick="distSchedule()">Schedule due</button>
+      <button class="btn sm primary" onclick="distPublishDue()">Publish due</button>
+    </div>
+    <div class="grid grid-4" style="margin-bottom:16px;">
+      <div class="card"><div class="kpi"><div class="kpi-value">${counts.scheduled}</div><div class="kpi-label">Scheduled</div></div></div>
+      <div class="card"><div class="kpi"><div class="kpi-value">${counts.draft}</div><div class="kpi-label">Drafts</div></div></div>
+      <div class="card"><div class="kpi"><div class="kpi-value">${counts.failed}</div><div class="kpi-label">Failed</div></div></div>
+      <div class="card"><div class="kpi"><div class="kpi-value">${counts.published}</div><div class="kpi-label">Published</div></div></div>
+    </div>
+    ${accounts.length ? `<div class="card" style="margin-bottom:16px;"><div class="label">Accounts</div><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">${accounts.map((account) => `${badge(`${account.platform}:${account.account}`, account.authorized ? 'success' : 'danger')}`).join('')}</div></div>` : ''}
+    <div class="stack">${cards}</div>
+  `;
+};
+
+window.runDist = async (action) => {
+  try {
+    const r = await api('/api/actions/distribution', { method:'POST', body: { action } });
+    toast(`Distribution ${action}: ${r.processed ?? 0} processed, ${r.skipped ?? 0} skipped`);
+    render();
+    return r;
+  } catch (e) { toast(e.message,'error'); return null; }
+};
+
+window.distSchedule = () => openModal(
+  'Schedule due posts',
+  '<p>This assigns the next eligible slots to scheduled content and creates calendar entries.</p>',
+  {
+    confirmLabel: 'Schedule',
+    onConfirm: async () => Boolean(await window.runDist('schedule')),
+  }
+);
+
+window.distPublishDue = () => openModal(
+  'Publish due posts',
+  '<p>This publishes every due post through its configured publisher. Published posts are not retried.</p>',
+  {
+    confirmLabel: 'Publish due',
+    onConfirm: async () => Boolean(await window.runDist('publish')),
+  }
+);
+
+window.distPublishPost = (postId) => {
+  const post = window._distribution?.postsById?.[postId];
+  openModal(
+    'Publish post',
+    `<p>Publish post #${postId}${post ? ` (${esc(post.platform)}:${esc(post.account)})` : ''} now?</p><p class="meta">The engine will claim it and use saved provider state if a prior attempt was interrupted.</p>`,
+    {
+      confirmLabel: 'Publish',
+      onConfirm: async () => {
+        try {
+          const r = await api('/api/actions/distribution', { method:'POST', body: { action:'publish', postId } });
+          toast(`Published ${r.published ?? 0}, drafts ${r.drafts ?? 0}, failed ${r.failed ?? 0}`);
+          render();
+          return true;
+        } catch (e) { toast(e.message,'error'); return false; }
+      },
+    }
+  );
+};
+
+window.distResetState = (postId) => openModal(
+  'Reset publish state',
+  `<p>Reset the saved provider state for post #${postId}?</p><p class="meta">Check the platform first. Resetting an upload that reached the platform can create a duplicate.</p>`,
+  {
+    confirmLabel: 'Reset state',
+    onConfirm: async () => {
+      try {
+        await api('/api/actions/distribution', { method:'POST', body: { action:'reset_publish_state', postId, confirm:true } });
+        toast('Publish state reset');
+        render();
+        return true;
+      } catch (e) { toast(e.message,'error'); return false; }
+    },
+  }
+);
+
+window.distEditCopy = (postId) => {
+  const post = window._distribution?.postsById?.[postId];
+  if (!post) return;
+  window.adaptCopy(post.content_item_id, post.platform, post.account, post);
+};
+
+window.adaptCopy = async (itemId, platform = '', account = '', post = null) => {
+  const key = platform && account ? `${platform}:${account}` : '';
+  const hashtags = Array.isArray(post?.hashtags) ? post.hashtags.join(', ') : '';
+  let approvedImages = [];
+  try {
+    const { assets } = await api('/api/assets');
+    approvedImages = (assets || []).filter((a) => a.content_item_id === itemId && /\.(png|jpe?g|webp)$/i.test(a.file_path || ''));
+  } catch (e) { approvedImages = []; }
+  openModal('Platform copy', `<div class="stack">
+    <div class="card-flat"><div class="label">Platform:account</div><input class="input" id="m-key" placeholder="tiktok:main" value="${esc(key)}" ${post ? 'readonly' : ''} /></div>
+    <div class="card-flat"><div class="label">Title <span class="meta" id="m-title-count">${(post?.title||'').length}/100</span></div><input class="input" id="m-title" value="${esc(post?.title || '')}" oninput="document.getElementById('m-title-count').textContent=this.value.length+'/100';const p=document.getElementById('m-yt-preview');if(p)p.textContent=this.value+'\n\n'+(document.getElementById('m-desc')?.value||'')" /></div>
+    <div class="card-flat"><div class="label">Caption</div><textarea class="textarea" id="m-caption" style="min-height:110px;">${esc(post?.caption || '')}</textarea></div>
+    <div class="card-flat"><div class="label">Description <span class="meta" id="m-desc-count">${(post?.description||'').length}/5000</span></div><textarea class="textarea" id="m-desc" style="min-height:70px;" oninput="document.getElementById('m-desc-count').textContent=this.value.length+'/5000';const p=document.getElementById('m-yt-preview');if(p)p.textContent=(document.getElementById('m-title')?.value||'')+'\n\n'+this.value">${esc(post?.description || '')}</textarea></div>
+    <div class="card-flat"><div class="label">Hashtags (comma separated)</div><input class="input" id="m-tags" placeholder="#ai, #automation" value="${esc(hashtags)}" /></div>
+    ${key.startsWith('youtube') ? `
+    <div class="card-flat"><div class="label">Thumbnail (approved image asset)</div>
+      <select class="input" id="m-thumb-asset" onchange="const v=this.value; document.getElementById('m-thumb').value=v; const img=document.getElementById('m-thumb-preview'); if(v){img.src=(window.mediaUrl?mediaUrl(v):v); img.style.display='block';}else{img.style.display='none';}">
+        <option value="">None</option>
+        ${approvedImages.map((a) => `<option value="${esc(a.file_path)}" ${post?.thumbnail_path === a.file_path ? 'selected' : ''}>#${a.id} ${esc(a.file_path.split('/').pop())} ${a.width||''}x${a.height||''}</option>`).join('')}
+      </select>
+      <input class="input" id="m-thumb" value="${esc(post?.thumbnail_path || '')}" placeholder="or manual path" style="margin-top:6px;" />
+      <img id="m-thumb-preview" src="" style="max-width:100%;margin-top:6px;display:none;" />
+    </div>
+    ` : `<div class="card-flat"><div class="label">Thumbnail path (optional)</div><input class="input" id="m-thumb" value="${esc(post?.thumbnail_path || '')}" /></div>`}
+    ${key.startsWith('youtube') ? `
+    <div class="card-flat"><div class="label">YouTube category</div><select class="input" id="m-yt-category">
+      <option value="22" ${(post?.platform_metadata?.categoryId||post?.categoryId||'22')==='22'?'selected':''}>People & Blogs (22)</option>
+      <option value="27" ${(post?.platform_metadata?.categoryId||post?.categoryId)==='27'?'selected':''}>Education (27)</option>
+      <option value="28" ${(post?.platform_metadata?.categoryId||post?.categoryId)==='28'?'selected':''}>Science & Technology (28)</option>
+      <option value="24" ${(post?.platform_metadata?.categoryId||post?.categoryId)==='24'?'selected':''}>Entertainment (24)</option>
+    </select></div>
+    <div class="card-flat"><div class="label">Language (optional)</div><input class="input" id="m-yt-lang" placeholder="en" value="${esc(post?.platform_metadata?.defaultLanguage || post?.defaultLanguage || '')}" /></div>
+    <div class="card-flat"><div class="label">Scheduled publish time (optional, ISO)</div><input class="input" id="m-yt-sched" placeholder="2026-..." value="${esc(post?.scheduled_at || '')}" /></div>
+    <div class="meta">YouTube uploads default to private. Scheduling requires a future time and keeps the video private until publishAt.</div>
+    <div class="card-flat"><div class="label">Live preview</div><div id="m-yt-preview" style="white-space:pre-wrap;"></div></div>
+    ` : ''}
+  </div>`, {
+    confirmLabel: post ? 'Save copy' : 'Create post',
+    onConfirm: async () => {
+      const copyKey = document.getElementById('m-key').value.trim();
+      if (!copyKey) { toast('Platform:account required', 'error'); return false; }
+      const tags = document.getElementById('m-tags').value.split(',').map((t) => t.trim()).filter(Boolean);
+      const copy = {};
+      const entry = {
+        title: document.getElementById('m-title').value.trim(),
+        caption: document.getElementById('m-caption').value.trim(),
+        description: document.getElementById('m-desc').value.trim(),
+        hashtags: tags,
+        thumbnail_path: document.getElementById('m-thumb').value.trim() || null,
+      };
+      if (copyKey.startsWith('youtube')) {
+        const sched = document.getElementById('m-yt-sched')?.value.trim() || '';
+        entry.platform_metadata = {
+          categoryId: document.getElementById('m-yt-category')?.value || '22',
+          defaultLanguage: document.getElementById('m-yt-lang')?.value.trim() || null,
+          schedule: Boolean(sched),
+        };
+        if (sched) entry.scheduled_at = sched;
+      }
+      copy[copyKey] = entry;
+      try {
+        const r = await api('/api/actions/distribution', { method:'POST', body: { action:'adapt', targetId:itemId, copy, dryRun:false } });
+        toast(`Copy saved: ${r.processed ?? 0} processed, ${r.skipped ?? 0} skipped`);
+        render();
+        return true;
+      } catch (e) { toast(e.message,'error'); return false; }
+    },
+  });
+};
+
+// CALENDAR
+views.calendar = async (c) => {
+  const { entries } = await api('/api/calendar');
+  c.innerHTML = `
+    <div class="card">
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Date</th><th>Kind</th><th>Platform</th><th>Item</th><th>Post</th><th>Status</th></tr></thead>
+        <tbody>
+          ${entries.map((e) => `<tr><td>${esc(fmtDate(e.date))}</td><td>${esc(e.kind)}</td><td>${esc(e.platform||'—')}</td><td>${e.content_item_id?'#'+e.content_item_id:'—'}</td><td>${e.post_id?'#'+e.post_id:'—'}</td><td>${statusBadge(e.status)}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">No calendar entries</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+};
+
+// ENGAGEMENT
+views.engagement = async (c) => {
+  const [eng, conv] = await Promise.all([api('/api/engagement'), api('/api/conversations')]);
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:10px;">Engagement items (manual triage — automation engine is stubbed)</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Platform</th><th>Kind</th><th>Author</th><th>Text</th><th>Classification</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${eng.items.map((e) => `
+            <tr>
+              <td>${e.id}</td><td>${esc(e.platform)}</td><td>${esc(e.kind)}</td><td>${esc(e.author)}</td>
+              <td style="max-width:260px;">${esc(e.text)}</td>
+              <td>${badge(e.classification||'unclassified')}</td>
+              <td>${statusBadge(e.status)}</td>
+              <td class="row">
+                <button class="btn sm" onclick="triageEng(${e.id},'lead')">Lead</button>
+                <button class="btn sm" onclick="triageEng(${e.id},'idea',true)">Idea</button>
+                <button class="btn sm" onclick="triageEng(${e.id},'simple')">Simple</button>
+                <button class="btn sm danger" onclick="triageEng(${e.id},'negative')">Escalate</button>
+              </td>
+            </tr>
+          `).join('') || `<tr><td colspan="8" class="empty">No engagement items</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:10px;">Conversations (leads)</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Platform</th><th>Lead</th><th>Status</th><th>Last msg</th></tr></thead>
+        <tbody>
+          ${conv.conversations.map((cv) => `<tr><td>${cv.id}</td><td>${esc(cv.platform)}</td><td>${esc(cv.lead_name||'—')}</td><td>${statusBadge(cv.lead_status)}</td><td class="meta">${esc(fmtDate(cv.last_message_at))}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">No conversations</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+};
+window.triageEng = async (id, classification, saveAsIdea = false) => {
+  try {
+    await api('/api/actions/engagement', { method:'POST', body: { action:'triage', id, patch: { classification, status: classification === 'negative' ? 'escalated' : 'resolved', saveAsIdea } } });
+    toast('Triaged'); render();
+  } catch (e) { toast(e.message,'error'); }
+};
+
+// ANALYTICS
+views.analytics = async (c) => {
+  const [ins, pb, metrics] = await Promise.all([api('/api/insights'), api('/api/playbook'), api('/api/metrics')]);
+  c.innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:10px;">Insights (automation engine is stubbed — manual promotion available)</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Claim</th><th>Dimension</th><th>Effect</th><th>Confidence</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${ins.insights.map((i) => `
+            <tr>
+              <td>${i.id}</td><td style="max-width:320px;">${esc(i.claim)}</td><td>${esc(i.dimension||'—')}</td><td>${esc(i.effect||'—')}</td>
+              <td>${i.confidence!=null?i.confidence.toFixed(2):'—'}</td><td>${statusBadge(i.status)}</td>
+              <td class="row">
+                <button class="btn sm primary" onclick="promoteInsight(${i.id})">Promote</button>
+                <button class="btn sm" onclick="setInsightStatus(${i.id},'rejected')">Reject</button>
+              </td>
+            </tr>
+          `).join('') || `<tr><td colspan="7" class="empty">No insights</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:10px;">Playbook rules</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Rule</th><th>Dimension</th><th>Status</th></tr></thead>
+        <tbody>
+          ${pb.rules.map((r) => `<tr><td>${r.id}</td><td style="max-width:420px;">${esc(r.rule)}</td><td>${esc(r.dimension||'—')}</td><td>${statusBadge(r.status)}</td></tr>`).join('') || `<tr><td colspan="4" class="empty">No playbook rules</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:10px;">Metrics (recent)</h3>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Post</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Saves</th><th>Collected</th></tr></thead>
+        <tbody>
+          ${metrics.metrics.slice(0,30).map((m) => `<tr><td>${m.id}</td><td>#${m.post_id}</td><td>${m.views??0}</td><td>${m.likes??0}</td><td>${m.comments??0}</td><td>${m.shares??0}</td><td>${m.saves??0}</td><td class="meta">${esc(fmtDate(m.collected_at))}</td></tr>`).join('') || `<tr><td colspan="8" class="empty">No metrics</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
+};
+window.promoteInsight = async (id) => {
+  try { await api('/api/actions/analytics', { method:'POST', body: { action:'promote_insight', id } }); toast('Promoted to playbook'); render(); } catch (e) { toast(e.message,'error'); }
+};
+window.setInsightStatus = async (id, status) => {
+  try { await api('/api/actions/analytics', { method:'POST', body: { action:'set_insight_status', id, patch: { status } } }); toast('Updated'); render(); } catch (e) { toast(e.message,'error'); }
+};
+
+// ASSETS
+views.assets = async (c) => {
+  const { assets } = await api('/api/assets');
+  c.innerHTML = `
+    <div class="card">
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>ID</th><th>Item</th><th>Platform</th><th>Status</th><th>Dims</th><th>Orientation</th><th>File</th></tr></thead>
+        <tbody>
+          ${assets.map((a) => `
+            <tr>
+              <td>${a.id}</td><td>#${a.content_item_id}</td><td>${esc(a.platform)}</td><td>${statusBadge(a.status)}</td>
+              <td>${a.width||'—'}×${a.height||'—'}</td><td>${esc(a.orientation||'—')}</td>
+              <td class="meta" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;">${esc(a.file_path||'—')}</td>
+            </tr>
+          `).join('') || `<tr><td colspan="7" class="empty">No assets</td></tr>`}
+        </tbody>
+      </table></div>
+    </div>
+  `;
 };
 
 // TEMPLATES / REFERENCE

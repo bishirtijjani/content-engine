@@ -102,7 +102,7 @@ export class InstagramPublisher {
    * @param {(patch: object|null) => void} args.updateState
    * @returns {Promise<{ externalId: string, url: string|null }>}
    */
-  async publish({ account = this.account, post, asset, item, state = null, updateState = () => {} } = {}) {
+  async publish({ account = this.account, post, asset, assets = null, item, state = null, updateState = () => {} } = {}) {
     if (account !== this.account) {
       throw new InstagramConfigError(
         `Instagram publisher for '${this.account}' cannot publish account '${account}'`
@@ -132,6 +132,15 @@ export class InstagramPublisher {
 
     await this._ensureToken();
     await this._verifyAccount();
+
+    const imageAssets = (Array.isArray(assets) ? assets : (asset ? [asset] : []))
+      .filter((a) => isImageAsset(a?.file_path));
+    if (imageAssets.length >= 1) {
+      if (imageAssets.length === 1) {
+        return this._publishSingleImage(post, imageAssets[0], item);
+      }
+      return this._publishCarousel(post, imageAssets, item);
+    }
 
     // The process died after asking Instagram to publish. Find the post
     // before doing anything else.
@@ -648,10 +657,78 @@ export class InstagramPublisher {
     return new InstagramError(message, { ...meta, retryable: err.retryable });
   }
 
+  async _publishSingleImage(post, asset, item) {
+    const filePath = asset?.file_path;
+    if (!filePath) throw new InstagramConfigError('the post has no asset file_path');
+    const absolute = path.resolve(filePath);
+    if (!existsSync(absolute)) throw new InstagramConfigError(`image not found: ${absolute}`);
+    const ext = path.extname(absolute).toLowerCase();
+    if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
+      throw new InstagramMediaError('Instagram feed posts require JPG or PNG');
+    }
+    const upload = await this.mediaHost.upload({
+      itemId: item?.id ?? null,
+      filePath: absolute,
+      contentType: ext === '.png' ? 'image/png' : 'image/jpeg',
+    });
+    const body = await this._graph('POST', `/${this.userId}/media`, {
+      body: { image_url: upload.url, caption: composeCaption(post) },
+    });
+    if (!body?.id) throw new InstagramError('Instagram did not return a media container id', { retryable: true });
+    const mediaId = await this._graph('POST', `/${this.userId}/media_publish`, {
+      body: { creation_id: body.id },
+    });
+    if (!mediaId?.id) throw new InstagramError('Instagram did not return a media id', { retryable: true });
+    await this._releaseMedia(upload.key);
+    return { externalId: mediaId.id, url: null };
+  }
+
+  async _publishCarousel(post, assets, item) {
+    const childIds = [];
+    const keys = [];
+    for (const asset of assets.slice(0, 10)) {
+      const filePath = asset?.file_path;
+      if (!filePath) continue;
+      const absolute = path.resolve(filePath);
+      if (!existsSync(absolute)) continue;
+      const ext = path.extname(absolute).toLowerCase();
+      if (!['.jpg', '.jpeg', '.png'].includes(ext)) continue;
+      const upload = await this.mediaHost.upload({
+        itemId: item?.id ?? null,
+        filePath: absolute,
+        contentType: ext === '.png' ? 'image/png' : 'image/jpeg',
+      });
+      keys.push(upload.key);
+      const child = await this._graph('POST', `/${this.userId}/media`, {
+        body: { image_url: upload.url, is_carousel_item: true },
+      });
+      if (child?.id) childIds.push(child.id);
+    }
+    if (childIds.length < 2) {
+      throw new InstagramMediaError('Instagram carousel requires at least 2 images');
+    }
+    const carousel = await this._graph('POST', `/${this.userId}/media`, {
+      body: {
+        media_type: 'CAROUSEL',
+        children: childIds,
+        caption: composeCaption(post),
+      },
+    });
+    if (!carousel?.id) throw new InstagramError('Instagram did not return a carousel container id', { retryable: true });
+    const mediaId = await this._graph('POST', `/${this.userId}/media_publish`, {
+      body: { creation_id: carousel.id },
+    });
+    if (!mediaId?.id) throw new InstagramError('Instagram did not return a media id', { retryable: true });
+    for (const key of keys) await this._releaseMedia(key);
+    return { externalId: mediaId.id, url: null };
+  }
+
   _warn(message) {
     try { this.logger?.warn?.(message); } catch { /* logging must not fail a publish */ }
   }
 }
+
+function isImageAsset(p) { return /\.(png|jpe?g|gif|webp)$/i.test(String(p || '')); }
 
 export function composeCaption(post = {}) {
   const caption = typeof post.caption === 'string' ? post.caption.trim() : '';

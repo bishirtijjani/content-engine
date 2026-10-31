@@ -210,6 +210,24 @@ export function groupCaptions(words, o) {
 }
 
 /**
+ * The "one emphasis per caption" rule, enforced for a generous emphasis list: if
+ * a caption ended up carrying more than one emph unit, keep the first and demote
+ * the rest to plain. This lets the agent pick many phrases without two landing
+ * in the same caption and hard-failing the build.
+ */
+export function keepFirstEmphasis(caps) {
+  for (const c of caps) {
+    let seen = false;
+    for (const t of c) {
+      if (!t.emph) continue;
+      if (seen) t.emph = false;
+      else seen = true;
+    }
+  }
+  return caps;
+}
+
+/**
  * The gate. Returns [] when every caption obeys the rules; otherwise a list of
  * violations. build-captions.mjs throws on any violation, so a caption that breaks
  * a clause or dangles a function word cannot reach a render.
