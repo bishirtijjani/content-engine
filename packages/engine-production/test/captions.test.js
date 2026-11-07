@@ -8,14 +8,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { groupCaptions, validateCaptions, norm } from '../tools/lib/captions.mjs';
 
-const EMPHASIS = ['AI automation', 'AI engineer', 'Bishir Tijjani'];
+const EMPHASIS = ['AI automation', 'AI engineer', 'Example Brand'];
 const OPTS = { emphasis: EMPHASIS, maxWords: 5, maxChars: 30, pauseGap: 0.7 };
 
 /** words with tight, even timings so CLAUSES (not pauses) drive the grouping */
 const mk = (s) => s.split(/\s+/).map((text, i) => ({ text, start: i * 0.4, end: i * 0.4 + 0.35 }));
 const texts = (caps) => caps.map((c) => c.map((t) => t.text).join(' '));
 
-const INTRO = "I'm a software developer and AI engineer, and I'm the founder of Bishir Tijjani.";
+const INTRO = "I'm a software developer and AI engineer, and I'm the founder of Example Brand.";
 const BUILD = 'I build software tools and AI automation for businesses to help them run their operations smoothly.';
 
 test("compound term 'AI engineer' is one atomic emphasis unit, never split", () => {
@@ -46,10 +46,10 @@ test("a caption never ends on a dangling function word — 'for businesses to'",
   assert.ok(out.includes('for businesses'), `expected "for businesses" as its own scene, got ${JSON.stringify(out)}`);
 });
 
-test("'founder of Bishir Tijjani' stays together — 'of' binds backward and must not break", () => {
+test("'founder of Example Brand' stays together — 'of' binds backward and must not break", () => {
   const caps = groupCaptions(mk(INTRO), OPTS);
   const withBishir = texts(caps).find((c) => /Bishir/.test(c));
-  assert.match(withBishir, /founder of Bishir Tijjani/i, `"of" was split from its phrase: "${withBishir}"`);
+  assert.match(withBishir, /founder of Example Brand/i, `"of" was split from its phrase: "${withBishir}"`);
 });
 
 test('both real sentences produce zero validator violations', () => {

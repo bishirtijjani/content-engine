@@ -105,7 +105,7 @@ INSTAGRAM_TOKEN_EXPIRES_AT=...
 
 # nginx media
 MEDIA_HOST_PROVIDER=nginx
-MEDIA_HOST_PUBLIC_BASE_URL=https://files.codeket.com/media
+MEDIA_HOST_PUBLIC_BASE_URL=https:///media
 MEDIA_HOST_ROOT_DIR=/opt/docker/apps/content-os/media
 MEDIA_HOST_KEY_PREFIX=instagram
 MEDIA_HOST_TTL_HOURS=24
@@ -136,7 +136,7 @@ JSON credentials file for other deployments.
 
 Instagram requires a public video URL. The nginx media host hardlinks the
 render into `/opt/docker/apps/content-os/media`, under an unguessable path,
-and returns `https://files.codeket.com/media/...`. The link is removed after a
+and returns `https:///media/...`. The link is removed after a
 successful publish; files older than `TTL_HOURS` are removed by the worker.
 
 nginx must mount the directory read-only and serve it:

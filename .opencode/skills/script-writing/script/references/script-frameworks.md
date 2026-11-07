@@ -1,4 +1,4 @@
-# Bishir Tijjani Script Frameworks
+# Example Brand Script Frameworks
 
 ## The 9 verified script structures
 Bias to complex educational + storytelling (structures 2, 3, 4, 8, 9) — better follower/lead conversion. Easy structures (1) are for reach only.
@@ -69,10 +69,10 @@ Results: A got [bad], B got [good]. Outro: explain the why.
 - **Mistake:** "You're doing [thing] wrong if [sign]."
 
 ## The 5× outlier rule + templatize method
-Only borrow the STRUCTURE of reels that got ≥5× the creator's follower count in views (e.g. 300K followers → 1.5M+ views). Method: transcribe (gettranscribe.ai) → templatize into fill-in-the-blank → fill with Bishir Tijjani value. Never copy words.
+Only borrow the STRUCTURE of reels that got ≥5× the creator's follower count in views (e.g. 300K followers → 1.5M+ views). Method: transcribe (gettranscribe.ai) → templatize into fill-in-the-blank → fill with Example Brand value. Never copy words.
 
 ## Idea + Hook Matrix (ready-to-film cells)
-Acct: IB=@iambishir (founder/blue) · CK=@codekethq (agency/orange).
+Acct: IB=@examplebrand (founder/blue) · CK=@examplehq (agency/orange).
 
 ### Workflow Automation
 - IB Tutorial — Automate lead follow-ups w/ Zapier in 5 min · "You're losing leads while you sleep — here's the 5-minute fix."
@@ -126,7 +126,7 @@ Acct: IB=@iambishir (founder/blue) · CK=@codekethq (agency/orange).
 - CK Case Study — Founder-led sales → system · "How we turned founder-led sales into a system."
 - IB Quick Win — "The 'Sunday Brain Dump' that organizes your whole week."
 
-### Story / Lesson (founder — @iambishir only)
+### Story / Lesson (founder — @examplebrand only)
 - S1 "A client said 'that's impossible to automate.' 3 days later it ran itself."
 - S2 "The best product I ever built got zero users — here's the lesson."
 - S3 "I was building useful software before AI made it easy. Here's what most people miss."

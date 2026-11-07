@@ -29,7 +29,7 @@ export const BINDERS = new Set(["of"]);
 const CONJ = new Set(["and", "or", "but", "so"]);
 
 // Deliberately conservative: only these prepositions reliably open a new phrase.
-// ("of" binds tightly backward — "founder OF Bishir Tijjani" must never split.)
+// ("of" binds tightly backward — "founder OF Example Brand" must never split.)
 const PREP_BREAK = new Set(["for", "to"]);
 
 export const norm = (t) => t.replace(/[^\w']/g, "").toLowerCase();

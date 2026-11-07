@@ -33,7 +33,7 @@ function credentials() {
     },
     mediaHost: {
       provider: 'nginx',
-      publicBaseUrl: 'https://files.codeket.com/media',
+      publicBaseUrl: 'https:///media',
       rootDir: mkdtempSync(path.join(tmpdir(), 'composer-media-')),
       keyPrefix: 'instagram',
       ttlHours: 24,

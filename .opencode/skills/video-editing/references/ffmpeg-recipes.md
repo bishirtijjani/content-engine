@@ -1,4 +1,4 @@
-# Bishir Tijjani ffmpeg Recipes
+# Example Brand ffmpeg Recipes
 
 Brand: orange `#EA580C`, surface `#F59E0B`, navy `#0f4c81`, text `#FFFFFF`, white `#FFFFFF`. Replace `IN.mp4`/`OUT.mp4`. Point `fontfile=` at a Montserrat .ttf (e.g. download Montserrat-Black.ttf into the working dir).
 

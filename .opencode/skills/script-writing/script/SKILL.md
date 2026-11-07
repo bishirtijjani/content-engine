@@ -1,7 +1,7 @@
 ---
-name: codeket-script
+name: script
 description: >-
-  Write reels, shorts, and video scripts for Bishir Tijjani using the locked
+  Write reels, shorts, and video scripts for Example Brand using the locked
   hook engine, content pillars, and the 9 verified script structures. Use when
   the user asks to "write a script", "write a reel", "give me a hook", "script a video
   about X", "turn this idea into a reel", or "make content about [topic]". Produces a
@@ -9,7 +9,7 @@ description: >-
   and caption + hashtags — tagged to @iambishir.
 ---
 
-# Bishir Tijjani Script
+# Example Brand Script
 
 Write scripts that convert to followers and leads, not vanity views. Every script is built from the system in `references/script-frameworks.md` — read it before writing.
 
@@ -43,7 +43,7 @@ CAPTION: <1–2 lines + 3–6 hashtags>
 ON-SCREEN CAPTIONS: <the key phrases to burn in, one phrase per beat, emphasis word CAPS>
 ```
 
-The ON-SCREEN CAPTIONS block should follow the locked caption style (one phrase at a time, emphasis word big/own line) so it hands off cleanly to the `codeket-video` skill.
+The ON-SCREEN CAPTIONS block should follow the locked caption style (one phrase at a time, emphasis word big/own line) so it hands off cleanly to the `video-editing` skill.
 
 ## Choosing a structure
 

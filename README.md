@@ -542,11 +542,11 @@ The cleaning steps also have Python self-tests (not run by `npm test`): `python 
 
 ---
 
-## Brand: Bishir Tijjani
+## Brand: Example Brand
 
 The system is seeded with a real brand profile:
 
-- **Who:** Bishir Tijjani — full-stack engineer who builds production systems
+- **Who:** Example Brand — full-stack engineer who builds production systems
 - **Positioning:** "Custom software and AI that actually works"
 - **5 pillars:** workflow-automation, custom-software, ai-implementation, customer-acquisition, business-operations
 - **5 platforms:** TikTok (5x/week), YouTube (2x/week), Instagram (3x/week), LinkedIn (3x/week), X (daily)

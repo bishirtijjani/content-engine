@@ -14,13 +14,13 @@ function setSetting(key, value) {
   console.log(`  ${key} ✓`);
 }
 
-console.log('=== Setting up Bishir Tijjani ===\n');
+console.log('=== Setting up Example Brand ===\n');
 
 // --- Brand ---
 console.log('Brand:');
 setSetting('brand', {
-  name: 'Bishir Tijjani',
-  company: 'Bishir Tijjani',
+  name: 'Example Brand',
+  company: 'Example Company',
   tagline: 'Custom software and AI that actually works',
   tone: ['practical', 'educational', 'direct', 'technical', 'operational', 'entertaining'],
   voice: 'Show real builds, not theory. Save-worthy content that makes people think "I need this for my business."',

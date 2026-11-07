@@ -45,10 +45,10 @@
   },
 
   "brand": {
-    "name": "Bishir Tijjani",
+    "name": "Example Brand",
     "lexicon": "brand/lexicon.json",
     "assets": "brand/assets",
-    "tokens": ".opencode/skills/codeket-assets/references/tokens.css",
+    "tokens": ".opencode/skills/example-assets/references/tokens.css",
     "account": "founder",
     "accounts": {
       "founder": { "handle": "@iambishir", "accent": "#0f4c81" }
@@ -72,8 +72,8 @@
     "engine": "faster-whisper",
     "model": "base.en",
     "language": "en",
-    "style": "codeket-locked",
-    "emphasis": ["AI automation", "AI engineer", "Bishir Tijjani"],
+    "style": "style-locked",
+    "emphasis": ["AI automation", "AI engineer", "Example Brand"],
     "maxEmphasisPerPhrase": 1,
     "font": { "baseRatio": 0.040, "emphRatio": 1.5, "plainWeight": 600, "emphWeight": 900 },
     "grouping": {

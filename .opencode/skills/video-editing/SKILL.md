@@ -1,7 +1,7 @@
 ---
-name: codeket-video
+name: video-editing
 description: >-
-  Edit video to Bishir Tijjani brand using ffmpeg — burn in branded word-by-word captions,
+  Edit video to Example Brand brand using ffmpeg — burn in branded word-by-word captions,
   resize/reframe to 9:16 / 1:1 / 16:9, add orange intro and outro cards, overlay the
   logo watermark, trim and stitch clips, and normalize audio. Use when the user asks
   to "edit this video", "add captions", "make this a reel", "resize to vertical", "add
@@ -9,9 +9,9 @@ description: >-
   user provides the raw clip(s); this skill produces a finished branded MP4.
 ---
 
-# Bishir Tijjani Video
+# Example Brand Video
 
-Edit user-supplied footage into finished, on-brand Bishir Tijjani video using ffmpeg in the sandbox. This does real editing on real clips — it does not generate footage from nothing.
+Edit user-supplied footage into finished, on-brand Example Brand video using ffmpeg in the sandbox. This does real editing on real clips — it does not generate footage from nothing.
 
 ## Setup
 
@@ -35,7 +35,7 @@ Follow this exactly when burning captions:
 - **Emphasis words are much bigger** and sit on **their own line**, colored navy.
 - Montserrat 800–900, ALL-CAPS, centered low-third (roughly y = h*0.72).
 
-Prefer generating an ASS/SSA subtitle file (supports per-word color, size, positioning, fade) and burning it with `-vf "ass=captions.ass"`. `references/ffmpeg-recipes.md` includes an ASS template with the Bishir Tijjani styles. For simple cases use chained `drawtext` filters.
+Prefer generating an ASS/SSA subtitle file (supports per-word color, size, positioning, fade) and burning it with `-vf "ass=captions.ass"`. `references/ffmpeg-recipes.md` includes an ASS template with the Example Brand styles. For simple cases use chained `drawtext` filters.
 
 ## Core operations
 

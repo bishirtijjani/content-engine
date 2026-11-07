@@ -1,4 +1,4 @@
-// Seed the script-writing framework — the taste of Bishir Tijjani, written down.
+// Seed the script-writing framework — your brand taste, written down.
 // Any AI agent reads settings.script_framework before writing a script.
 // Edit this file and re-run to update: node scripts/seed-script-framework.mjs
 import { connect } from '@content-os/core';
@@ -6,7 +6,7 @@ import { connect } from '@content-os/core';
 const FRAMEWORK = {
   version: 7,
   purpose:
-    "How any AI agent writes scripts for Bishir Tijjani. Read this before writing a single word. " +
+    "How any AI agent writes scripts for your brand. Read this before writing a single word. " +
     "The engine finalizes; YOU (the agent) write the content. This guide is the brand's taste, written down.",
 
   quality_bar: {

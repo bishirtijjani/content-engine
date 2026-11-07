@@ -11,7 +11,7 @@
 //   3. node scripts/tiktok-auth.mjs --slot 1 --account main --authorize
 //      Open the printed URL, authorize, and copy the code from the redirect.
 //   4. node scripts/tiktok-auth.mjs --slot 1 --account main --code <CODE>
-//      Or run the callback server and use --redirect-uri https://content-os.codeket.com/tiktok/callback
+//      Or run the callback server and use --redirect-uri https:///tiktok/callback
 //
 // Callback server:
 //   node scripts/tiktok-auth.mjs --serve --host 0.0.0.0 --port 8787

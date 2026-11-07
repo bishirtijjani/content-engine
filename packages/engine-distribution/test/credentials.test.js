@@ -287,7 +287,7 @@ test('env: nginx media hosting is configured through the environment', () => {
     path: path.join(dir, 'missing.json'),
     env: {
       MEDIA_HOST_PROVIDER: 'nginx',
-      MEDIA_HOST_PUBLIC_BASE_URL: 'https://files.codeket.com/media',
+      MEDIA_HOST_PUBLIC_BASE_URL: 'https:///media',
       MEDIA_HOST_ROOT_DIR: '/opt/docker/apps/content-os/media',
       MEDIA_HOST_KEY_PREFIX: 'instagram',
       MEDIA_HOST_TTL_HOURS: '24',
@@ -297,7 +297,7 @@ test('env: nginx media hosting is configured through the environment', () => {
   const host = mediaHostConfig(loaded);
   assert.deepEqual(host, {
     provider: 'nginx',
-    publicBaseUrl: 'https://files.codeket.com/media',
+    publicBaseUrl: 'https:///media',
     rootDir: '/opt/docker/apps/content-os/media',
     keyPrefix: 'instagram',
     ttlHours: 24,

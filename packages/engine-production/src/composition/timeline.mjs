@@ -159,7 +159,7 @@ export function buildSnapshotComposition({
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=${width}, height=${height}" />
-    <title>${esc(brand.name || 'Bishir Tijjani')} video</title>
+    <title>${esc(brand.name || 'Example Brand')} video</title>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
 ${fontFaceCss(s)}

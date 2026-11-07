@@ -179,7 +179,7 @@ fast-track, illegal jumps, Markdown rendering.
 
 ### 5.2 Content Engine — end-to-end
 
-22 content ideas seeded for Bishir/Codeket. Pipeline runs:
+22 content ideas seeded for Example Brand. Pipeline runs:
 discover → evaluate → plan → research → script. All fields populated
 automatically. Scripts rendered in browser with live editor.
 

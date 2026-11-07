@@ -1,5 +1,5 @@
 // build-captions.mjs — transcript -> the caption layer of a composition,
-// styled to the Bishir Tijjani caption spec (all values come from config/style.json):
+// styled to the Example Brand caption spec (all values come from config/style.json):
 //
 //   - mostly navy, ALL-CAPS Montserrat 800/900
 //   - NO box / no background — heavy drop shadow only
@@ -238,7 +238,7 @@ export function buildCaptionsComposition(opts) {
     videoSrc,
     width,
     height,
-    title = "Bishir Tijjani video",
+    title = "Example Brand video",
     configPath,
     lexiconPath,
     duration: explicitDuration,
@@ -268,7 +268,7 @@ export function buildCaptionsComposition(opts) {
     <title>${esc(title)}</title>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
-      /* Bishir Tijjani caption spec — no box, heavy shadow, ALL-CAPS Montserrat */
+      /* Example Brand caption spec — no box, heavy shadow, ALL-CAPS Montserrat */
 ${layer.css}
       body { margin: 0; background: ${brand.colors?.bg || "#0B1220"}; }
       #root { position: relative; width: ${width}px; height: ${height}px; overflow: hidden; background: ${brand.colors?.bg || "#0B1220"}; }

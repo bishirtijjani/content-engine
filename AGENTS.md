@@ -15,7 +15,7 @@ what, and the exact rules that keep it working.
 
 ## What this is
 
-A content automation engine for Bishir Tijjani (custom software & AI).
+A content automation engine for Example Brand (custom software & AI).
 It takes fresh ideas → scored picks → planned topics → researched → finished
 scripts → **ready to shoot**, then cleans the raw recording and turns it into a
 **finished, on-brand video**. The master's orientation follows the footage:

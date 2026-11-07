@@ -165,7 +165,7 @@ test('missing storage configuration is refused', () => {
 
 const NGINX_CONFIG = {
   provider: 'nginx',
-  publicBaseUrl: 'https://files.codeket.com/media',
+  publicBaseUrl: 'https:///media',
   rootDir: null,
   keyPrefix: 'instagram',
   ttlHours: 24,
@@ -189,7 +189,7 @@ test('nginx media host hardlinks a render into the served directory', async () =
   const uploaded = await host.upload({ itemId: 7, filePath: source });
 
   assert.match(uploaded.key, /^instagram\/item-7\/[0-9a-f]{32}-master\.mp4$/);
-  assert.match(uploaded.url, /^https:\/\/files\.codeket\.com\/media\/instagram\/item-7\//);
+  assert.match(uploaded.url, /^https:\/\/files.example.com\/media\/instagram\/item-7\//);
 
   const served = path.join(rootDir, uploaded.key);
   assert.ok(existsSync(served));

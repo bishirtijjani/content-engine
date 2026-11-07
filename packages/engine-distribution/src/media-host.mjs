@@ -32,7 +32,7 @@ export class MediaHostError extends Error {
  *
  * Config:
  *   provider: "nginx"
- *   publicBaseUrl: "https://files.codeket.com/media"
+ *   publicBaseUrl: "https:///media"
  *   rootDir: "/opt/docker/apps/content-os/media"
  *   keyPrefix: "instagram"
  *   ttlHours: 24
